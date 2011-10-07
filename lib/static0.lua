@@ -93,19 +93,7 @@ function exports(mount, root, options)
   -- cached files
   local cache = {}
 
-  function invalidate_cache_entry(status, event, path)
-p("on_change", {status=status,event=event,path=path}, self)
-    if cache[path] then
-      cache[path].dirty = true
-    end
-    -- FIXME: is it safe to dispose watcher in its event handler?
-    -- TODO: how to obtain watcher here?!
-    --self:close()
-    --self = nil
-  end
-
-local NUM1 = 0
-local NUM2 = 0
+local NUM = 0
 
   --
   -- request handler
@@ -123,12 +111,6 @@ local NUM2 = 0
 
     -- cache hit?
     local entry = cache[filename]
-    -- reap ditry entries
-    -- TODO: should use **clone**, then setting to nil will be safe!
-    if entry and entry.dirty then
-      cache[filename] = nil
-      entry = nil
-    end
     if entry and entry.data then
       -- no need to serve anything if file is cached at client side
       if entry.headers['Last-Modified'] == req.headers['if-modified-since'] then
@@ -138,6 +120,10 @@ local NUM2 = 0
       end
       return
     end
+
+    -- cache miss. allocate entry
+    cache[filename] = {}
+    entry = cache[filename]
 
     --
     -- TODO: generalize this pattern
@@ -153,43 +139,32 @@ local NUM2 = 0
       end
 
       -- fetch stat
-local err, stat
-if not entry or not entry.stat then
-NUM1 = NUM1 + 1
-p("stat-ed", NUM1, {path=filename})
-      err, stat = FS.fstat(co, fd)
+      local err, stat = FS.fstat(co, fd)
       if err then
         serve_not_found(res)
         FS.close(co, fd)
         return
       end
-else
-  stat = entry.stat
-end
 
       -- collect information on file
-      entry = {
-        name = filename,
-        stat = stat,
-        headers = {
-          ['Content-Type'] = MIME.by_filename(filename),
-          ['Cache-Control'] = 'public, max-age=' .. (max_age / 1000),
-          ['Last-Modified'] = os.date('%c', stat.mtime),
-          ['Etag'] = stat.size .. '-' .. stat.mtime,
-        },
+      entry.name = filename
+      entry.stat = stat
+      entry.headers = {
+        ['Content-Type'] = MIME.by_filename(filename),
+        ['Cache-Control'] = 'public, max-age=' .. (max_age / 1000),
+        ['Last-Modified'] = os.date('%c', stat.mtime),
+        ['Etag'] = stat.size .. '-' .. stat.mtime,
       }
 
       -- file should be cached?
       -- N.B. race may occur, since many concurrent requests
-      -- may try to cache this file simultaneously
+      -- may try to cache this file simultaneously.
+      -- TODO: validate this reason!!!
       if options.is_cacheable and
         options.is_cacheable(entry) and
-        -- disable caching of file being cached
+        -- let's disable caching of file being cached
         not cache[filename]
       then
-
-        -- preallocate cache entry, to avoid race
-        cache[filename] = entry
 
         -- collect file contents
         local offset = 0
@@ -208,18 +183,26 @@ end
         -- cache file contents
         entry.data = table.concat(parts, '')
         entry.headers['Content-Length'] = #entry.data
+        cache[filename] = entry
     
         -- serve the file as if it were previously cached
         serve(res, entry, req.headers.range)
-
-NUM2 = NUM2 + 1
-p("cached", NUM2, {path=filename, headers=entry.headers})
     
+        -- watch this file for changes
+NUM = NUM + 1
+p("cached", NUM, {path=filename, headers=entry.headers})
+        local watcher = UV.new_fs_watcher(filename)
+        watcher:set_handler('change', function (status, event, path)
+          -- should any change occur, invalidate cache
+p("on_change", {status=status,event=event,path=path})
+          cache[filename] = nil
+          -- FIXME: is it safe to dispose watcher in its event handler?
+          watcher:close()
+          watcher = nil
+        end)
+
       -- file is not going to be cached -> stream it
       else
-
-        -- allocate cache entry without data, to save fstat calls
-        cache[filename] = entry
 
         -- no need to serve anything if file is cached at client side
         if entry.headers['Last-Modified'] == req.headers['if-modified-since'] then
@@ -256,12 +239,6 @@ p("cached", NUM2, {path=filename, headers=entry.headers})
         -- TODO: use no coro version here
         FS.close(co, fd)
       end
-
-      -- watch this file for changes
-      local watcher = UV.new_fs_watcher(filename)
-      -- should any change occur, invalidate cache entry
-      -- TODO: event emitters should pass `self`
-      watcher:set_handler('change', invalidate_cache_entry)
 
     end)
     coroutine.resume(co)
