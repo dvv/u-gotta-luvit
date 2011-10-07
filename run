@@ -1,0 +1,4 @@
+#!/bin/sh
+
+#sudo ulimit -n 16384
+exec luvit stack.lua
