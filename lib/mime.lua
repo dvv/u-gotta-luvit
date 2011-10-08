@@ -1,6 +1,6 @@
 --
 --
--- mime type lookup. dvv, 2011, MIT Licensed
+-- mime database
 --
 --
 
@@ -14,7 +14,8 @@ local exports = {
 }
 
 -- read map from file
-for line in io.lines('lib/mime.types') do
+local IO = require('io')
+for line in IO.lines('lib/mime.types') do
   if not line:find('#') then
     --print(line)
     local mime = nil

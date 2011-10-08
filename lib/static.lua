@@ -1,41 +1,62 @@
 --
---
--- static file server. dvv, 2011, MIT Licensed
---
+-- static file server
 --
 
-local exports = {}
+local UV = require('uv')
+local FS = require('fs')
+local OS = require('os')
+local Table = require('table')
+local MIME = require('lib/mime')
 
-function clone(obj)
-  local x = {}
-  for k, v in pairs(obj) do x[k] = v end
-  return x
+--
+-- open file `path`, seek to `offset` octets from beginning and
+-- read `size` subsequent octets.
+-- call `progress` on each read chunk
+--
+local CHUNK_SIZE = 4096
+local function noop() end
+function stream_file(path, offset, size, progress, callback)
+  UV.fs_open(path, 'r', '0666', function (err, fd)
+    if err then return callback(err) end
+    local function readchunk()
+      local chunk_size = size < CHUNK_SIZE and size or CHUNK_SIZE
+      UV.fs_read(fd, offset, chunk_size, function (err, chunk)
+        if err or #chunk == 0 then
+          callback(err)
+          UV.fs_close(fd, noop)
+        else
+          chunk_size = #chunk
+          offset = offset + chunk_size
+          size = size - chunk_size
+          if progress then progress(chunk) end
+          readchunk()
+        end
+      end)
+    end
+    readchunk()
+  end)
 end
 
 --
--- return request handler
+-- setup request handler
 --
 function exports(mount, root, options)
 
   if not options then options = {} end
   local max_age = options.max_age or 0
 
-  local UV = require('uv')
-  local FS = require('fs')
-  local MIME = require('lib/mime')
-
   -- given Range: header, return start, end numeric pair
   function parse_range(range, size)
-    local start, stop, http_status
-    http_status = 200
-    if range and range ~= '' then
+    local start, stop, partial
+    partial = false
+    if range then
       -- parse bytes=start-stop
-      start, stop = string.match(range, 'bytes=(%d*)-?(%d*)')
-      http_status = 206
+      start, stop = range:match('bytes=(%d*)-?(%d*)')
+      partial = true
     end
     start = tonumber(start) or 0
     stop = tonumber(stop) or size - 1
-    return start, stop, http_status
+    return start, stop, partial
   end
 
   -- serve 404 error
@@ -45,67 +66,98 @@ function exports(mount, root, options)
   end
 
   -- serve 304 not modified
-  function serve_not_modified(res, entry)
-    res:write_head(304, entry.headers)
+  function serve_not_modified(res, file)
+    res:write_head(304, file.headers)
     res:finish()
   end
 
   -- serve 416 invalid range
-  function serve_invalid_range(res, headers)
-    res:write_head(416, headers)
+  function serve_invalid_range(res, file)
+    res:write_head(416, {
+      ['Content-Range'] = 'bytes=*/' .. file.size
+    })
     res:finish()
   end
 
-  -- serve entry.data, honor Range: header
-  function serve(res, entry, range)
+  -- cache entries table
+  local cache = {}
+
+  -- handler for 'change' event of all file watchers
+  function invalidate_cache_entry(status, event, path)
+d("on_change", {status=status,event=event,path=path}, self)
+    -- invalidate cache entry and free the watcher
+    if cache[path] then
+      cache[path].watch:close()
+      cache[path] = nil
+    end
+  end
+
+--[[
+debugging stuff. wanna know how many concurrent requests do some things
+before cache entry is set
+]]--
+local NUM1 = 0
+local NUM2 = 0
+
+  -- given file, serve contents, honor Range: header
+  function serve(res, file, range, cache_it)
     -- adjust headers
-    local headers = clone(entry.headers)
-    headers['Date'] = os.date('%c')
-    -- range specified? serve substring
+    local headers = clone(file.headers)
+    headers['Date'] = OS.date('%c')
+    --
+    local size = file.size
+    local start = 0
+    local stop = size - 1
+    -- range specified? adjust headers and http status for response
     if range then
-      local size = entry.stat.size
-      local start, stop = parse_range(range, size)
---p("ranged", start, stop)
-      -- range is invalid? bail out
-      if stop < start or stop >= size then
-        headers['Content-Range'] = 'bytes */' .. size
-        serve_invalid_range(res, headers)
+      start, stop = parse_range(range, size)
+      -- limit range by file size
+      if stop >= size then stop = size - 1 end
+      -- check range validity
+      if stop < start then
+        serve_invalid_range(res, file)
         return
       end
       -- adjust Content-Length:
       headers['Content-Length'] = stop - start + 1
       -- append Content-Range:
-      headers['Content-Range'] =
-        string.format('bytes=%d-%d/%d', start, stop, size)
+      headers['Content-Range'] = ('bytes=%d-%d/%d'):format(start, stop, size)
       res:write_head(206, headers)
---p("serve", headers)
-      -- serve just specified range of bytes
-      res:write(entry.data.sub(start + 1, stop - start + 1))
-    -- serve the whole data
     else
       res:write_head(200, headers)
---p("serve", headers)
-      res:write(entry.data)
     end
-    res:finish()
-  end
-
-  -- cached files
-  local cache = {}
-
-  function invalidate_cache_entry(status, event, path)
-p("on_change", {status=status,event=event,path=path}, self)
-    if cache[path] then
-      cache[path].dirty = true
+    -- serve from cache, if available
+--d("serve", headers)
+    if file.data then
+      res:write(range and file.data.sub(start + 1, stop - start + 1) or file.data)
+      res:finish()
+    -- otherwise stream and possibly cache
+    else
+      -- N.B. don't cache if range specified
+      if range then cache_it = false end
+      local index = 1
+      local parts = {}
+      stream_file(file.name, start, stop - start + 1,
+        -- progress
+        function(chunk)
+          if cache_it then
+            parts[index] = chunk
+            index = index + 1
+          end
+          res:write(chunk)
+        end,
+        -- eof
+        function(err)
+          res:finish()
+          if cache_it then
+NUM2 = NUM2 + 1
+d("cached", NUM2, {path=filename, headers=file.headers})
+            file.data = Table.concat(parts, '')
+          end
+        end
+      )
     end
-    -- FIXME: is it safe to dispose watcher in its event handler?
-    -- TODO: how to obtain watcher here?!
-    --self:close()
-    --self = nil
   end
-
-local NUM1 = 0
-local NUM2 = 0
 
   --
   -- request handler
@@ -121,150 +173,52 @@ local NUM2 = 0
     -- TODO: Path.normalize(req.url)
     local filename = root .. req.url:sub(mount_found_at + #mount)
 
-    -- cache hit?
-    local entry = cache[filename]
-    -- reap ditry entries
-    -- TODO: should use **clone**, then setting to nil will be safe!
-    if entry and entry.dirty then
-      cache[filename] = nil
-      entry = nil
-    end
-    if entry and entry.data then
-      -- no need to serve anything if file is cached at client side
-      if entry.headers['Last-Modified'] == req.headers['if-modified-since'] then
-        serve_not_modified(res, entry)
-      else
-        serve(res, entry, req.headers.range)
-      end
+    -- stream file, possibly caching the contents for later reuse
+    local file = cache[filename]
+
+    -- no need to serve anything if file is cached at client side
+    if file and file.headers['Last-Modified'] == req.headers['if-modified-since'] then
+      serve_not_modified(res, file)
       return
     end
 
-    --
-    -- TODO: generalize this pattern
-    --
-    local co
-    co = coroutine.create(function()
-
-      -- open file
-      local err, fd = FS.open(co, filename, 'r', '0644')
-      if err then
-        serve_not_found(res)
-        return
-      end
-
-      -- fetch stat
-local err, stat
-if not entry or not entry.stat then
+    if file then
+      serve(res, file, req.headers.range, false)
+    else
+      FS.stat(filename, function(err, stat)
+        if err then
+          serve_not_found(res)
+          return
+        end
+        -- create cache entry, even for files which contents are not
+        -- gonna be cached
+        -- collect information on file
+        file = {
+          name = filename,
+          size = stat.size,
+          mtime = stat.mtime,
+          -- FIXME: finer control client-side caching
+          headers = {
+            ['Content-Type'] = MIME.by_filename(filename),
+            ['Content-Length'] = stat.size,
+            ['Cache-Control'] = 'public, max-age=' .. (max_age / 1000),
+            ['Last-Modified'] = OS.date('%c', stat.mtime),
+            ['Etag'] = stat.size .. '-' .. stat.mtime,
+          },
+        }
+        -- allocate cache entry
+        cache[filename] = file
+        -- should any changes in this file occur, invalidate cache entry
+        file.watch = UV.new_fs_watcher(filename)
+        file.watch:set_handler('change', invalidate_cache_entry)
 NUM1 = NUM1 + 1
-p("stat-ed", NUM1, {path=filename})
-      err, stat = FS.fstat(co, fd)
-      if err then
-        serve_not_found(res)
-        FS.close(co, fd)
-        return
-      end
-else
-  stat = entry.stat
-end
-
-      -- collect information on file
-      entry = {
-        name = filename,
-        stat = stat,
-        headers = {
-          ['Content-Type'] = MIME.by_filename(filename),
-          ['Cache-Control'] = 'public, max-age=' .. (max_age / 1000),
-          ['Last-Modified'] = os.date('%c', stat.mtime),
-          ['Etag'] = stat.size .. '-' .. stat.mtime,
-        },
-      }
-
-      -- file should be cached?
-      -- N.B. race may occur, since many concurrent requests
-      -- may try to cache this file simultaneously
-      if options.is_cacheable and
-        options.is_cacheable(entry) and
-        -- disable caching of file being cached
-        not cache[filename]
-      then
-
-        -- preallocate cache entry, to avoid race
-        cache[filename] = entry
-
-        -- collect file contents
-        local offset = 0
-        local parts = {}
-        local index = 1
-        repeat
-          local err, chunk = FS.read(co, fd, offset, 4096)
-          local length = #chunk
-          offset = offset + length
-          parts[index] = chunk
-          index = index + 1
-        until length == 0
-        -- TODO: use no coro version here
-        FS.close(co, fd)
-
-        -- cache file contents
-        entry.data = table.concat(parts, '')
-        entry.headers['Content-Length'] = #entry.data
-    
-        -- serve the file as if it were previously cached
-        serve(res, entry, req.headers.range)
-
-NUM2 = NUM2 + 1
-p("cached", NUM2, {path=filename, headers=entry.headers})
-    
-      -- file is not going to be cached -> stream it
-      else
-
-        -- allocate cache entry without data, to save fstat calls
-        cache[filename] = entry
-
-        -- no need to serve anything if file is cached at client side
-        if entry.headers['Last-Modified'] == req.headers['if-modified-since'] then
-          serve_not_modified(res, entry)
-          return
-        end
-
-        local size = entry.stat.size
-        local offset, stop, http_status =
-          parse_range(req.headers.range, size)
-        entry.headers['Date'] = os.date('%c')
-        -- range is invalid? bail out
-        if stop < offset or stop >= size then
-          entry.headers['Content-Range'] = 'bytes=*/' .. size
-          serve_invalid_range(res, entry.headers)
-          return
-        end
-        local total = stop - offset + 1
-        entry.headers['Content-Length'] = total
-        if http_status ~= 200 then
-          entry.headers['Content-Range'] =
-            string.format('bytes=%d-%d/%d', offset, stop, size)
-        end
---p("streaming", http_status, entry, offset, total, size)
-        res:write_head(http_status, entry.headers)
-        repeat
-          local err, chunk = FS.read(co, fd, offset, 4096)
-          local length = #chunk
-          offset = offset + length
-          total = total - length
-          res:write(chunk)
-        until total <= 0 or length == 0
-        res:finish()
-        -- TODO: use no coro version here
-        FS.close(co, fd)
-      end
-
-      -- watch this file for changes
-      local watcher = UV.new_fs_watcher(filename)
-      -- should any change occur, invalidate cache entry
-      -- TODO: event emitters should pass `self`
-      watcher:set_handler('change', invalidate_cache_entry)
-
-    end)
-    coroutine.resume(co)
+d("stat", NUM1, file)
+        -- shall we cache file contents?
+        local cache_it = options.is_cacheable
+          and options.is_cacheable(file)
+        serve(res, file, req.headers.range, cache_it)
+      end)
+    end
 
   end
 

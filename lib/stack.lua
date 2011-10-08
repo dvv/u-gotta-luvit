@@ -1,11 +1,8 @@
 --
---
--- creationix/Stack ported by dvv, 2011, MIT Licensed
---
+-- creationix/Stack ported
 --
 
 local exports = {}
---exports.__index = exports
 
 --
 -- handles errors inside stack, both exceptions and soft errors
