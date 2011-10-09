@@ -6,7 +6,7 @@ local exports = {}
 
 local OS = require('os')
 local Crypto = require('openssl')
-local JSON = require('json')
+local JSON = require('cjson')
 local String = require('lib/string')
 
 function expires_in(ttl)

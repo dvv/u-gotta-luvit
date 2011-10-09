@@ -1,4 +1,4 @@
 #!/bin/sh
 
 #sudo ulimit -n 16384
-exec luvit example.lua
+exec ./luvit example.lua
