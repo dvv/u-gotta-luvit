@@ -13,7 +13,7 @@ local MIME = require('lib/mime')
 -- read `size` subsequent octets.
 -- call `progress` on each read chunk
 --
-local CHUNK_SIZE = 4096
+local CHUNK_SIZE = 16384 --4096
 local function noop() end
 function stream_file(path, offset, size, progress, callback)
   UV.fs_open(path, 'r', '0666', function (err, fd)
@@ -131,6 +131,23 @@ local NUM2 = 0
     if file.data then
       res:write(range and file.data.sub(start + 1, stop - start + 1) or file.data)
       res:finish()
+--[[
+      local data = range and file.data.sub(start + 1, stop - start + 1) or file.data
+      local offset = 0
+      local length = #data
+      local function writechunk()
+        res:write(data:sub(offset + 1, CHUNK_SIZE + offset), function(err, bytes_written)
+          if err then return callback(err) end
+          if bytes_written + offset < length then
+            offset = offset + bytes_written
+            writechunk()
+          else
+            UV.fs_close(fd, callback)
+          end
+        end)
+      end
+      writechunk()
+]]--
     -- otherwise stream and possibly cache
     else
       -- N.B. don't cache if range specified
@@ -144,7 +161,9 @@ local NUM2 = 0
             parts[index] = chunk
             index = index + 1
           end
-          res:write(chunk)
+          res:write(chunk, function(status)
+if (status ~= 0) then p('UVWRITE', status, #chunk) assert(0) end
+          end)
         end,
         -- eof
         function(err)

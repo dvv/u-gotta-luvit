@@ -102,6 +102,7 @@ local function stack() return {
   -- serve static files
   Stack.static('/public/', 'public/', {
     -- should the `file` contents be cached?
+    --is_cacheable = function(file) return file.size <= 65536 end,
     is_cacheable = function(file) return true end,
   }),
 
