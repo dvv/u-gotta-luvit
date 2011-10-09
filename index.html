@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head>
+  <!--link rel="stylesheet" media="all" href="less.css"/-->
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <script src="public/jquery-1.6.4.min.js"></script>
+  <script>
+$(function(){
+
+$.getJSON('/rpc/context').then(function(foo, bar, resp){
+  var session = JSON.parse(resp.responseText);
+  $('#hello').html('Hello, ' + (session.uid || 'guest') + '!');
+});
+
+});
+  </script>
+</head>
+<body>
+<h2><a href="https://github.com/dvv/u-gotta-luvit">U-Gotta-Luvit</a> example</h2>
+<h4><a style="text-align: right;" href="/rpc/auth">Perform auth to toggle sid cookie</a></h4>
+<p id="hello">Hello, World!</p>
+<p id="caps"></p>
+</body>
+</html>

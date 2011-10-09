@@ -9,7 +9,7 @@ local exports = {}
 --
 function exports.error_handler(req, res, err)
   if err then
-    local reason = err.stack or err
+    local reason = err
     print('\n' .. reason .. '\n')
     res:write_head(500, {['Content-Type'] = 'text/plain'})
     res:write(reason .. '\n')
@@ -53,52 +53,13 @@ function exports.create_server(layers, ...)
   return server
 end
 
---
---  private tests
---
-function exports.__test()
-  -- test ok
-  local stack = exports.create({
-    function (req, res, nxt)
-      nxt()
-    end,
-    function (req, res, nxt)
-      res.ok()
-    end,
-  })
-  local ok = false;
-  stack(nil, {ok = function() print('1. OK') end})
-  -- test hard error
-  exports.error_handler = function(req, res, err)
-    print(err)
-  end
-  local stack = exports.create({
-    function (req, res, nxt)
-      error('2. hard error OK')
-    end,
-    function (req, res, nxt)
-      res.ok()
-    end,
-  })
-  stack(nil, nil)
-  -- test soft error
-  local stack = exports.create({
-    function (req, res, nxt)
-      nxt('3. soft error OK')
-    end,
-    function (req, res, nxt)
-      res.ok()
-    end,
-  })
-  stack(nil, nil)
-end
-
---[[
--- TODO: perform test if this module is called, not require()d
-if not package.preload.stack and exports.__test then
-  exports.__test()
-end
-]]--
+exports.health = require('lib/stack/health')
+exports.static = require('lib/stack/static')
+exports.session = require('lib/stack/session').session
+exports.auth = require('lib/stack/session').auth
+exports.body = require('lib/stack/body')
+exports.rest = require('lib/stack/rest')
+exports.chrome = require('lib/stack/chrome')
 
 -- export module
 return exports

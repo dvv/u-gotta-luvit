@@ -30,44 +30,121 @@ function extend_unless(obj, with)
   return obj
 end
 
-function stack()
-  return {
-    --[[function (req, res, nxt)
-      --error('AAA')
-      nxt()
-    end,
-    function (req, res, nxt)
-      nxt()
-    end,]]--
-    require('lib/static')('/public/', '', {
-      -- should the `file` contents be cached?
-      is_cacheable = function(file) return true end,
-    }),
 --[[
-    function (req, res, nxt)
-      if req.method ~= 'GET' then
-        p(req)
-        req.socket:set_handler('read', function(data)
---        req:on('data', function(data)
-          p('data coming' .. data)
-        end)
-        res:finish()
-      else
-        nxt()
-      end
-    end,]]--
-    -- GET
-    function (req, res, nxt)
-      local s = ('Привет, Мир') --:rep(100)
-      res:write_head(200, {
-        ['Content-Type'] = 'text/plain',
-        ['Content-Length'] = s:len()
-      })
-      res:write(s)
-      res:finish()
-    end
-  }
+ *
+ * Application
+ *
+]]--
+
+local function authenticate(session, credentials, cb)
+  -- N.B. this is simple "toggle" logic.
+  -- in real world you should check credentials passed in `credentials`
+  -- to decide whether to let user in.
+  -- just assign `null` to session in case of error.
+  -- session already set? drop session
+  if session then
+    session = nil
+  -- no session so far? get new session
+  else
+    session = {
+      uid = tostring(require('math').random()):sub(3),
+    }
+  end
+  -- set the session
+  cb(session)
 end
+
+local function authorize(session, cb)
+  -- N.B. this is a simple wrapper for static context
+  -- in real world you should vary capabilities depending on the
+  -- current user defined in `session`
+  if session and session.uid then
+    cb({
+      uid = session.uid,
+      -- GET /foo?bar=baz ==> this.foo.query('bar=baz')
+      foo = {
+        query = function(query, cb)
+          cb(nil, {['you are'] = 'an authorized user!'})
+        end
+      },
+      bar = {
+        baz = {
+          add = function(data, cb)
+            cb({['nope'] = 'nomatter you are an authorized user ;)'})
+          end
+        }
+      },
+      context = {
+        query = function(query, cb)
+          cb(nil, session or {})
+        end
+      },
+    })
+  else
+    cb({
+      -- GET /foo?bar=baz ==> this.foo.query('bar=baz')
+      foo = {
+        query = function(query, cb)
+          cb(nil, {['you are'] = 'a guest!'})
+        end
+      },
+      context = {
+        query = function(query, cb)
+          cb(nil, session or {})
+        end
+      },
+    })
+  end
+end
+
+local function stack() return {
+
+  -- serve static files
+  Stack.static('/public/', 'public/', {
+    -- should the `file` contents be cached?
+    is_cacheable = function(file) return true end,
+  }),
+
+  -- handle session
+  Stack.session({
+    secret = 'change-me-in-production',
+    ttl = 15 * 60 * 1000,
+    -- called to get current user capabilities
+    authorize = authorize,
+  }),
+
+  -- serve chrome page
+  Stack.chrome(),
+
+  -- parse request body
+  Stack.body(),
+
+  -- handle authentication
+  Stack.auth('/rpc/auth', {
+    -- called to get current user capabilities
+    authenticate = authenticate,
+  }),
+
+  -- RPC & REST
+  Stack.rest('/rpc/'),
+
+  -- GET
+  function (req, res, nxt)
+--d(req)
+    local data = req.session and req.session.uid or 'Мир'
+    local s = ('Привет, ' .. data) --:rep(100)
+    res:write_head(200, {
+      ['Content-Type'] = 'text/plain',
+      ['Content-Length'] = s:len()
+    })
+    res:write(s)
+    res:finish()
+  end,
+
+  -- report health status to load balancer
+  Stack.health(),
+
+}end
 
 Stack.create_server(stack(), 65401)
 print('Server listening at http://localhost:65401/')

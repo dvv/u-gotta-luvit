@@ -35,9 +35,7 @@ end
 -- given filename, return its mime type
 --
 function exports.by_filename(filename)
-  local ext_offset = filename:find('.', 0, true)
-  local ext = ext_offset and filename:sub(ext_offset)
-  --p(filename, ext_offset, ext)
+  local ext = filename:lower():match('([.]%w+)$')
   return exports.table[ext] or exports.table['default']
 end
 
@@ -48,18 +46,6 @@ end
 function exports.by_content(content)
   error('Not Yet Implemented (and unlikely will be :)')
 end
-]]--
-
---p(exports.by_filename('a.js'))
-
---[[
-
-local Mime = require('mime')
-p(Mime.table)
-p(Mime.by_filename('a.js'))
-Mime.table['.js'] = 'myspecial/type'
-p(Mime.by_filename('a.js'))
-
 ]]--
 
 -- export module
