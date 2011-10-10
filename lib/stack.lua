@@ -59,6 +59,7 @@ exports.session = require('lib/stack/session').session
 exports.auth = require('lib/stack/session').auth
 exports.body = require('lib/stack/body')
 exports.rest = require('lib/stack/rest')
+exports.route = require('lib/stack/route')
 exports.chrome = require('lib/stack/chrome')
 
 -- export module

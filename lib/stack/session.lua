@@ -107,6 +107,7 @@ function exports.session(options)
       -- Set-Cookie
       -- FIXME: support multiple Set-Cookie:
       if cookie then
+        if not headers then headers = {} end
         headers['Set-Cookie'] = cookie
       end
       -- call original method

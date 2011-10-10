@@ -132,7 +132,8 @@ local NUM2 = 0
     -- serve from cache, if available
 --d("serve", headers)
     if file.data then
-      res:safe_write(range and file.data.sub(start + 1, stop - start + 1) or file.data, function()
+      res:safe_write(range and file.data.sub(start + 1, stop - start + 1) or file.data, function(...)
+--d('write', ...)
         res:finish()
       end)
     -- otherwise stream and possibly cache

@@ -1,4 +1,5 @@
-local uv = require('uv')
+local UV = require('fs')
+local FS = require('fs')
 local Stack = require('lib/stack')
 
 --
@@ -99,8 +100,62 @@ end
 
 local function stack() return {
 
+  -- upgrade res
+  function(req, response, nxt)
+    _G.r = req.socket
+    function response:safe_write(chunk, cb)
+      UV.write(self.socket, chunk, function(err, result)
+        if not err then cb(err, result) return end
+        -- retry on EBUSY
+        if err == 16 then
+          self:safe_write(chunk, cb)
+        else
+          p('WRITE FAILED', err)
+          cb(err)
+        end
+      end)
+    end
+    function response:send(code, data, headers)
+d('send', code, data, headers)
+      self:write_head(code, headers)
+      self:safe_write(data, function() self:finish() end)
+    end
+    --response.render = function(self, template, data, options)
+    function response:render(template, data, options)
+d('render', template, data)
+      --if not data then data = req.context end
+
+local function idem_renderer(template)
+  return function(data)
+    return template
+  end
+end
+
+  if not options then options = {} end
+  local renderer = options.renderer or idem_renderer
+
+    FS.read_file(template, function(err, text)
+      if err then
+        self:write_head(404, {})
+        self:finish()
+      else
+        local html = renderer(text)(data or req.context)
+        self:write_head(200, {
+          ['Content-Type'] = 'text/html',
+          ['Content-Length'] = #html,
+        })
+        self:write(html)
+        self:finish()
+      end
+    end)
+
+
+    end
+    nxt()
+  end,
+
   -- test serving requested amount of octets
-  function (req, res, nxt)
+  function(req, res, nxt)
     local n = tonumber(req.url:sub(2), 10)
     if not n then nxt() return end
     local s = (' '):rep(n)
@@ -117,7 +172,7 @@ local function stack() return {
   Stack.static('/public/', 'public/', {
     -- should the `file` contents be cached?
     --is_cacheable = function(file) return file.size <= 65536 end,
-    --is_cacheable = function(file) return true end,
+    is_cacheable = function(file) return true end,
   }),
 
   -- handle session
@@ -133,6 +188,16 @@ local function stack() return {
 
   -- parse request body
   Stack.body(),
+
+  -- process custom routes
+  Stack.route({
+    ['GET /foo'] = function(req, res, params, nxt)
+      res:send(200, 'FOOO', {})
+    end,
+    ['GET /bar'] = function(req, res, params, nxt)
+      res:render('index.html', {})
+    end,
+  }),
 
   -- handle authentication
   Stack.auth('/rpc/auth', {

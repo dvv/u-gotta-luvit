@@ -1,0 +1,34 @@
+#!/bin/sh
+
+N=10000
+
+one() {
+  # cache
+  ab -n$N -c$2 http://localhost:65401/public/$1 >/dev/null 2>&1
+  # run
+  ab -n$N -c$2 http://localhost:65440/public/$1 2>/dev/null | awk '
+    /Failed requests:/ {
+      failed = $3
+    }
+    /Requests per second:/ {
+      rps = $4
+    }
+    END {
+      print rps, failed
+    }
+  ' | while read rps failed; do
+    echo $1 $2 $rps $failed
+  done
+}
+
+many() {
+  one $1 $2
+  one $1 $2
+  one $1 $2
+  one $1 $2
+  one $1 $2
+}
+
+for len in 1024 2048 4096 8192 16384 32768 65536 131072; do
+  many $len 300
+done | tee log
