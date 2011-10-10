@@ -28,8 +28,11 @@ function stream_file(path, offset, size, progress, callback)
           chunk_size = #chunk
           offset = offset + chunk_size
           size = size - chunk_size
-          if progress then progress(chunk) end
-          readchunk()
+          if progress then
+            progress(chunk, function()
+              readchunk()
+            end)
+          end
         end
       end)
     end
@@ -129,25 +132,9 @@ local NUM2 = 0
     -- serve from cache, if available
 --d("serve", headers)
     if file.data then
-      res:write(range and file.data.sub(start + 1, stop - start + 1) or file.data)
-      res:finish()
---[[
-      local data = range and file.data.sub(start + 1, stop - start + 1) or file.data
-      local offset = 0
-      local length = #data
-      local function writechunk()
-        res:write(data:sub(offset + 1, CHUNK_SIZE + offset), function(err, bytes_written)
-          if err then return callback(err) end
-          if bytes_written + offset < length then
-            offset = offset + bytes_written
-            writechunk()
-          else
-            UV.fs_close(fd, callback)
-          end
-        end)
-      end
-      writechunk()
-]]--
+      res:safe_write(range and file.data.sub(start + 1, stop - start + 1) or file.data, function()
+        res:finish()
+      end)
     -- otherwise stream and possibly cache
     else
       -- N.B. don't cache if range specified
@@ -156,14 +143,12 @@ local NUM2 = 0
       local parts = {}
       stream_file(file.name, start, stop - start + 1,
         -- progress
-        function(chunk)
+        function(chunk, cb)
           if cache_it then
             parts[index] = chunk
             index = index + 1
           end
-          res:write(chunk, function(status)
-if (status ~= 0) then p('UVWRITE', status, #chunk) assert(0) end
-          end)
+          res:safe_write(chunk, cb)
         end,
         -- eof
         function(err)
