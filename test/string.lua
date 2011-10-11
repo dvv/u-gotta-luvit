@@ -1,6 +1,6 @@
 local String = require('lib/string')
 
-function test1()
+local function test1()
 
   local foo = 'Привет Мир!'
   local fooh = foo:tohex()
@@ -9,4 +9,14 @@ function test1()
 
 end
 
+local function test2(x)
+
+  print('Привет ${user}!' % {
+    user = function() return x or 'Мир' end
+  })
+  
+
+end
+
 test1()
+test2('foo') test2()

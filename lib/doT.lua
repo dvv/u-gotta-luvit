@@ -51,8 +51,8 @@ local function()
 
   doT.template = function(tmpl, c, def)
     c = c or doT.templateSettings
-    local cstart = c.append and "'+(" or "';out+=(" -- optimal choice depends on platform/size of templates
-    local cend   = c.append and ")+'" or ");out+='"
+    local cstart = c.append and "'..(" or "';out=out..(" -- optimal choice depends on platform/size of templates
+    local cend   = c.append and ")+'" or ");out=out..'"
     local str = (c.use or c.define) and resolveDefs(c, tmpl, def or {}) or tmpl
 
     str = ("var out='" ..
@@ -60,10 +60,10 @@ local function()
       .gsub(/\\/g, '\\\\')
       .gsub(/'/g, "\\'")
       .gsub(c.interpolate, function(match, code)
-        return cstart .. code.gsub(/\\'/g, "'").replace(/\\\\/g,"\\").gsub(/[\r\t\n]/g, ' ') .. cend
+        return cstart .. code.gsub(/\\'/g, "'").gsub(/\\\\/g,"\\").gsub(/[\r\t\n]/g, ' ') .. cend
       end)
       .gsub(c.encode, function(match, code) {
-        return cstart + code.replace(/\\'/g, "'").replace(/\\\\/g, "\\").replace(/[\r\t\n]/g, ' ') + ").toString().replace(/&(?!\\w+;)/g, '&#38;').split('<').join('&#60;').split('>').join('&#62;').split('" + '"' + "').join('&#34;').split(" + '"' + "'" + '"' + ").join('&#39;').split('/').join('&#47;'" + cend;
+        return cstart + (code.gsub(/\\'/g, "'").gsub(/\\\\/g, "\\").gsub(/[\r\t\n]/g, ' ') + ")):gsub(/&(?!\\w+;)/g, '&#38;').split('<').join('&#60;').split('>').join('&#62;').split('" + '"' + "').join('&#34;').split(" + '"' + "'" + '"' + ").join('&#39;').split('/').join('&#47;'" .. cend
       })
       .replace(c.evaluate, function(match, code) {
         return "';" + code.replace(/\\'/g, "'").replace(/\\\\/g,"\\").replace(/[\r\t\n]/g, ' ') + "out+='";
@@ -75,12 +75,7 @@ local function()
       .split("out+='';").join('')
       .split("var out='';out+=").join('var out=');
 
-    try {
-      return new Function(c.varname, str);
-    } catch (e) {
-      if (typeof console !== 'undefined') console.log("Could not create a template function: " + str);
-      throw e;
-    }
+    return new Function(c.varname, str)
   end
 
   return doT

@@ -1,3 +1,4 @@
+local String = require('lib/string')
 local Stack = require('lib/stack')
 
 --
@@ -134,7 +135,7 @@ local function stack() return {
   Stack.route({
     -- serve chrome page
     ['GET /'] = function(req, res, params, nxt)
-      res:render('index.html', req.context)
+      res:render('index.html', req.context, {renderer = String.interp})
     end,
     ['GET /foo'] = function(req, res, params, nxt)
       res:send(200, 'FOOO', {})

@@ -1,5 +1,28 @@
 local String = require('string')
 
+-- interpolation
+function String:interpolate(data)
+  if not data then
+    return self
+  elseif type(data) == 'table' then
+    if data[1] then
+      return self:format(unpack(b))
+    else
+      return (self:gsub('($%b{})', function(w)
+        local var = w:sub(3, -2)
+        local n, def = var:match('([^|]-)|(.*)')
+        if n then var = n end
+        local s = type(data[var]) == 'function' and data[var]() or data[var] or def or w
+        s = s:escape()
+        return s
+      end))
+    end
+  else
+    return self:format(data)
+  end
+end
+getmetatable('').__mod = String.interpolate
+
 function String:tohex()
   return (self:gsub('(.)', function(c)
     return String.format('%02x', String.byte(c))
@@ -14,7 +37,8 @@ end
 
 function String:escape()
   -- TODO: escape HTML entities
-  return self
+  return self:gsub('&%w+;', '&amp;'):gsub('<', '&lt;'):gsub('>', '&gt;'):gsub('"', '&quot;')
+  --return self
 end
 
 function String:unescape(s)
@@ -38,21 +62,6 @@ function String.url_encode(str)
     str = String.gsub(str, ' ', '+')
   end
   return str
-end
-
-function String:url_parse(parse_querystring)
-  -- '(.-)(?.*)'
-  local index = (self:find('?'))
-  local uri = index and {
-    pathname = self:sub(1, index - 1),
-    search = self:sub(index + 1),
-  } or {
-    pathname = self,
-    search = '',
-  }
-  if (parse_querystring) then
-  end
-  return uri
 end
 
 -- export module

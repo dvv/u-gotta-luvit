@@ -106,7 +106,8 @@ local renderer = options.renderer or idem_renderer
     if err then
       self:send(404)
     else
-      local html = renderer(text)(data)
+      --local html = renderer(text)(data)
+      local html = text % data
       self:send(200, html, {
         ['Content-Type'] = 'text/html',
         ['Content-Length'] = #html,

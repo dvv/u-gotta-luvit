@@ -16,6 +16,8 @@ end
 
 function setup(mount, options)
 
+  local parseUrl = require('url').parse
+
   -- defaults
   if not mount then mount = '/rpc/' end
   if not options then options = {} end
@@ -32,8 +34,7 @@ function setup(mount, options)
   return function(req, res, nxt)
 
     -- defaults
-    if not req.uri then req.uri = req.url:url_parse() end
-
+    if not req.uri then req.uri = parseUrl(req.url) end
     -- none of our business unless url starts with `mount`
     local path = req.uri.pathname
     if path:sub(1, mlen) ~= mount then return nxt() end
