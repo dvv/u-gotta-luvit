@@ -2,48 +2,15 @@
 -- static file server
 --
 
-local UV = require('uv')
-local FS = require('fs')
 local OS = require('os')
-local Table = require('table')
-local MIME = require('mime')
-
---
--- open file `path`, seek to `offset` octets from beginning and
--- read `size` subsequent octets.
--- call `progress` on each read chunk
---
-local CHUNK_SIZE = 16384 --4096
-local function noop() end
-function stream_file(path, offset, size, progress, callback)
-  UV.fs_open(path, 'r', '0666', function (err, fd)
-    if err then return callback(err) end
-    local function readchunk()
-      local chunk_size = size < CHUNK_SIZE and size or CHUNK_SIZE
-      UV.fs_read(fd, offset, chunk_size, function (err, chunk)
-        if err or #chunk == 0 then
-          callback(err)
-          UV.fs_close(fd, noop)
-        else
-          chunk_size = #chunk
-          offset = offset + chunk_size
-          size = size - chunk_size
-          if progress then
-            progress(chunk, function()
-              readchunk()
-            end)
-          end
-        end
-      end)
-    end
-    readchunk()
-  end)
-end
+local UV = require('uv')
+local get_mime = require('mime').get_type
+local stat = require('fs').stat
 
 --
 -- setup request handler
 --
-function exports(mount, root, options)
+return function(mount, root, options)
 
   if not options then options = {} end
   local max_age = options.max_age or 0
@@ -102,7 +69,7 @@ local NUM2 = 0
   -- given file, serve contents, honor Range: header
   function serve(res, file, range, cache_it)
     -- adjust headers
-    local headers = clone(file.headers)
+    local headers = copy(file.headers)
     headers['Date'] = OS.date('%c')
     --
     local size = file.size
@@ -179,7 +146,8 @@ d("cached", NUM2, {path=filename, headers=file.headers})
     local file = cache[filename]
 
     -- no need to serve anything if file is cached at client side
-    if file and file.headers['Last-Modified'] == req.headers['if-modified-since'] then
+    if file and file.headers['Last-Modified'] ==
+                req.headers['if-modified-since'] then
       serve_not_modified(res, file)
       return
     end
@@ -187,7 +155,7 @@ d("cached", NUM2, {path=filename, headers=file.headers})
     if file then
       serve(res, file, req.headers.range, false)
     else
-      FS.stat(filename, function(err, stat)
+      stat(filename, function(err, stat)
         if err then
           serve_not_found(res)
           return
@@ -201,7 +169,7 @@ d("cached", NUM2, {path=filename, headers=file.headers})
           mtime = stat.mtime,
           -- FIXME: finer control client-side caching
           headers = {
-            ['Content-Type'] = MIME.get_type(filename),
+            ['Content-Type'] = get_mime(filename),
             ['Content-Length'] = stat.size,
             ['Cache-Control'] = 'public, max-age=' .. (max_age / 1000),
             ['Last-Modified'] = OS.date('%c', stat.mtime),
@@ -225,6 +193,3 @@ d("stat", NUM1, file)
   end
 
 end
-
--- export module
-return exports

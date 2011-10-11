@@ -2,18 +2,6 @@
 -- ReST resource routing
 --
 
-local String = require('lib/string')
-local Table = require('table')
-local JSON = require('cjson')
-
-function is_array(obj)
-  return type(obj) == 'table' and Table.maxn(obj) > 0
-end
-
-function is_hash(obj)
-  return type(obj) == 'table' and Table.maxn(obj) == 0
-end
-
 function setup(mount, options)
 
   local parseUrl = require('url').parse

@@ -1,34 +1,5 @@
-local String = require('lib/string')
+require('lib/util')
 local Stack = require('lib/stack')
-
---
--- collection of various helpers. when critical mass will accumulated
--- they should go to some lib file
---
-function d(...)
-  if env.DEBUG then p(...) end
-end
-
-function clone(obj)
-  if type(obj) ~= 'table' then return obj end
-  local x = {}
-  for k, v in pairs(obj) do x[k] = v end
-  return x
-end
-
-function extend(obj, with)
-  for k, v in pairs(with) do obj[k] = v end
-  return obj
-end
-
-function extend_unless(obj, with)
-  for k, v in pairs(with) do
-    if obj[k] == nil then
-      obj[k] = v
-    end
-  end
-  return obj
-end
 
 --[[
  *

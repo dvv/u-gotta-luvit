@@ -2,12 +2,10 @@
 -- Provide req.session and user capabilities (req.context)
 --
 
-local exports = {}
-
 local OS = require('os')
 local Crypto = require('openssl')
-local JSON = require('cjson')
-local String = require('lib/string')
+
+local exports = {}
 
 function expires_in(ttl)
   return OS.date('%c', OS.time() + ttl)
