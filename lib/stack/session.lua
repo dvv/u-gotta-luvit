@@ -4,6 +4,7 @@
 
 local OS = require('os')
 local Crypto = require('openssl')
+local JSON = require('cjson')
 
 local exports = {}
 

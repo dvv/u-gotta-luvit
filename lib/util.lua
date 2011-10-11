@@ -138,9 +138,6 @@ function extend_unless(obj, with)
 end
 
 
--- provide JSON
-JSON = require('cjson')
-
 -----------------------------------------------------------
 --
 -- augment Request and Response

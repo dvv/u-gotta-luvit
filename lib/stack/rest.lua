@@ -2,6 +2,8 @@
 -- ReST resource routing
 --
 
+local JSON = require('cjson')
+
 function setup(mount, options)
 
   local parseUrl = require('url').parse
