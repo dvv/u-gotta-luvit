@@ -99,7 +99,7 @@ end
 function copy(obj)
   if type(obj) ~= 'table' then return obj end
   local x = {}
-  for k, v in pairs(obj) do x[k] = v end
+  setmetatable(x, {__index = obj})
   return x
 end
 
@@ -175,7 +175,7 @@ function Response.prototype:render(template, data, options)
 d('render', template, data)
 
   if not options then options = {} end
-  local renderer = options.renderer or idem_renderer
+  local renderer = options.renderer
 
   FS.read_file(template, function(err, text)
     if err then
@@ -202,7 +202,7 @@ local FS = require('fs')
 -- read `size` subsequent octets.
 -- call `progress` on each read chunk
 --
-local CHUNK_SIZE = 16384 --4096
+local CHUNK_SIZE = 4096
 local function noop() end
 function stream_file(path, offset, size, progress, callback)
   UV.fs_open(path, 'r', '0666', function (err, fd)
