@@ -120,7 +120,7 @@ function setup(mount, options)
 --p('PARSED', resource, method, params)
 
     -- called after handler finishes
-    function respond(err, result)
+    local function respond(err, result)
 --p('RPC!', err, result, options, req.body)
       local response
       -- JSON-RPC response

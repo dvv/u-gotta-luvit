@@ -63,11 +63,23 @@ function exports.read_session(key, secret, ttl, req)
   return nil
 end
 
+
+-- tests
+if false then
+local secret = 'foo-bar-baz$'
+local obj = {a = {foo = 123, bar = "456"}, b = {1,2,nil,3}, c = false, d = 0}
+local ser = serialize(secret, obj)
+p(ser)
+local deser = deserialize(secret, 1, ser)
+-- N.B. nils are killed
+p(deser, deser == obj)
+end
+
 --
 -- we keep sessions safely in encrypted and signed cookies.
 -- inspired by caolan/cookie-sessions
 --
-function exports.session(options)
+return function(options)
 
   -- defaults
   if not options then options = {} end
@@ -137,50 +149,7 @@ function exports.session(options)
       -- FIXME: admin context somehow?
       nxt()
     end
-  
-  end
-
-end
-
---
--- Handle signin/signout
---
-function exports.auth(url, options)
-
-  -- defaults
-  if not url then url = '/rpc/auth' end
-  if not options then options = {} end
-
-  return function(req, res, nxt)
-
-    if req.url == url then
-      -- given current session and request body, request new session
-      options.authenticate(req.session, req.body, function(session)
-        -- falsy session means to remove current session
-        req.session = session
-        -- go back
-        res:send(302, nil, {
-          ['Location'] = req.headers.referer or req.headers.referrer or '/'
-        })
-      end)
-    else
-      nxt()
-    end
 
   end
 
 end
-
--- tests
-if false then
-local secret = 'foo-bar-baz$'
-local obj = {a = {foo = 123, bar = "456"}, b = {1,2,nil,3}, c = false, d = 0}
-local ser = serialize(secret, obj)
-p(ser)
-local deser = deserialize(secret, 1, ser)
--- N.B. nils are killed
-p(deser, deser == obj)
-end
-
--- export module
-return exports

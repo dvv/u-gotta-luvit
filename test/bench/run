@@ -4,7 +4,7 @@ N=10000
 
 one() {
   # cache
-  ab -n$N -c$2 http://localhost:65401/public/$1 >/dev/null 2>&1
+  ab -n1 http://localhost:65401/public/$1 >/dev/null 2>&1
   # run
   ab -n$N -c$2 http://localhost:65401/public/$1 2>/dev/null | awk '
     /Failed requests:/ {

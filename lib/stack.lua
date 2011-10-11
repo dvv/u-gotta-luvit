@@ -50,14 +50,13 @@ function exports.create_server(layers, port, host)
 end
 
 --
+-- lazy accessors
 --
-exports.health = require('lib/stack/health')
-exports.static = require('lib/stack/static')
-exports.session = require('lib/stack/session').session
-exports.auth = require('lib/stack/session').auth
-exports.body = require('lib/stack/body')
-exports.rest = require('lib/stack/rest')
-exports.route = require('lib/stack/route')
+setmetatable(exports, {
+  __index = function(table, key)
+    return require('lib/stack/' .. key)
+  end
+})
 
 -- export module
 return exports

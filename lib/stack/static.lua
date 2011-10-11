@@ -16,7 +16,7 @@ return function(mount, root, options)
   local max_age = options.max_age or 0
 
   -- given Range: header, return start, end numeric pair
-  function parse_range(range, size)
+  local function parse_range(range, size)
     local start, stop, partial
     partial = false
     if range then
@@ -30,17 +30,17 @@ return function(mount, root, options)
   end
 
   -- serve 404 error
-  function serve_not_found(res)
+  local function serve_not_found(res)
     res:send(404)
   end
 
   -- serve 304 not modified
-  function serve_not_modified(res, file)
+  local function serve_not_modified(res, file)
     res:send(304, nil, file.headers)
   end
 
   -- serve 416 invalid range
-  function serve_invalid_range(res, file)
+  local function serve_invalid_range(res, file)
     res:send(416, nil, {
       ['Content-Range'] = 'bytes=*/' .. file.size
     })
@@ -50,7 +50,7 @@ return function(mount, root, options)
   local cache = {}
 
   -- handler for 'change' event of all file watchers
-  function invalidate_cache_entry(status, event, path)
+  local function invalidate_cache_entry(status, event, path)
 d("on_change", {status=status,event=event,path=path}, self)
     -- invalidate cache entry and free the watcher
     if cache[path] then
@@ -67,7 +67,7 @@ local NUM1 = 0
 local NUM2 = 0
 
   -- given file, serve contents, honor Range: header
-  function serve(res, file, range, cache_it)
+  local function serve(res, file, range, cache_it)
     -- adjust headers
     local headers = copy(file.headers)
     headers['Date'] = OS.date('%c')
