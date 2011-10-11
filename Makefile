@@ -9,7 +9,7 @@ build/luvit/build/luvit: build/luvit
 
 build/luvit:
 	mkdir -p build
-	git clone http://github.com/dvv/luvit.git build/luvit
+	git clone http://github.com/creationix/luvit.git build/luvit
 
 json: build/lua-cjson/cjson.so
 

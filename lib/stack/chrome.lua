@@ -24,16 +24,13 @@ return function(options)
 
     FS.read_file(chrome_path, function(err, template)
       if err then
-        res:write_head(404, {})
-        res:finish()
+        res:send(404, nil, {})
       else
         local html = renderer(template)(req.context)
-        res:write_head(200, {
+        res:send(200, html, {
           ['Content-Type'] = 'text/html',
           ['Content-Length'] = #html,
         })
-        res:write(html)
-        res:finish()
       end
     end)
 

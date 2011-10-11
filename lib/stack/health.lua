@@ -11,8 +11,7 @@ return function(url)
 
   return function(req, res, nxt)
     if req.url == url then
-      res:write_head(200, {})
-      res:finish()
+      res:send(200, nil, {})
     else
       nxt()
     end

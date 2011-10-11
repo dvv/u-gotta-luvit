@@ -6,7 +6,7 @@ local UV = require('uv')
 local FS = require('fs')
 local OS = require('os')
 local Table = require('table')
-local MIME = require('lib/mime')
+local MIME = require('mime')
 
 --
 -- open file `path`, seek to `offset` octets from beginning and
@@ -64,22 +64,19 @@ function exports(mount, root, options)
 
   -- serve 404 error
   function serve_not_found(res)
-    res:write_head(404, {})
-    res:finish()
+    res:send(404)
   end
 
   -- serve 304 not modified
   function serve_not_modified(res, file)
-    res:write_head(304, file.headers)
-    res:finish()
+    res:send(304, nil, file.headers)
   end
 
   -- serve 416 invalid range
   function serve_invalid_range(res, file)
-    res:write_head(416, {
+    res:send(416, nil, {
       ['Content-Range'] = 'bytes=*/' .. file.size
     })
-    res:finish()
   end
 
   -- cache entries table
@@ -134,7 +131,7 @@ local NUM2 = 0
     if file.data then
       res:safe_write(range and file.data.sub(start + 1, stop - start + 1) or file.data, function(...)
 --d('write', ...)
-        res:finish()
+        res:close()
       end)
     -- otherwise stream and possibly cache
     else
@@ -153,7 +150,7 @@ local NUM2 = 0
         end,
         -- eof
         function(err)
-          res:finish()
+          res:close()
           if cache_it then
 NUM2 = NUM2 + 1
 d("cached", NUM2, {path=filename, headers=file.headers})
@@ -204,7 +201,7 @@ d("cached", NUM2, {path=filename, headers=file.headers})
           mtime = stat.mtime,
           -- FIXME: finer control client-side caching
           headers = {
-            ['Content-Type'] = MIME.by_filename(filename),
+            ['Content-Type'] = MIME.get_type(filename),
             ['Content-Length'] = stat.size,
             ['Cache-Control'] = 'public, max-age=' .. (max_age / 1000),
             ['Last-Modified'] = OS.date('%c', stat.mtime),

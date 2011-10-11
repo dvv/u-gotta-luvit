@@ -161,10 +161,9 @@ function exports.auth(url, options)
         -- falsy session means to remove current session
         req.session = session
         -- go back
-        res:write_head(302, {
+        res:send(302, nil, {
           ['Location'] = req.headers.referer or req.headers.referrer or '/'
         })
-        res:finish()
       end)
     else
       nxt()

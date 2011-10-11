@@ -6,7 +6,7 @@ one() {
   # cache
   ab -n$N -c$2 http://localhost:65401/public/$1 >/dev/null 2>&1
   # run
-  ab -n$N -c$2 http://localhost:65440/public/$1 2>/dev/null | awk '
+  ab -n$N -c$2 http://localhost:65401/public/$1 2>/dev/null | awk '
     /Failed requests:/ {
       failed = $3
     }

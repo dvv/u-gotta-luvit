@@ -25,7 +25,7 @@ end
 --        req:on('data', function(data)
           p('data coming' .. data)
         end)
-        res:finish()
+        res:close()
       else
         nxt()
       end

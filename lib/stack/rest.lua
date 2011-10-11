@@ -158,7 +158,7 @@ function setup(mount, options)
       end
 --p('RPC!!', response)
       if response then res:write(JSON.encode(response)) end
-      res:finish()
+      res:close()
     end
 
     --
