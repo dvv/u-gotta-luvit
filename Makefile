@@ -38,15 +38,15 @@ zeromq: build/lua-zmq/build/zmq.so
 # requires cmake :(
 #
 build/lua-zmq/build/zmq.so: build/lua-zmq/build
-	# lua-zmq will look for liblua, let's link libluajit
-	#ln -sf $(LUA_DIR)/libluajit.a $(LUA_DIR)/liblua.a
-	ln -sf libluajit.a $(LUA_DIR)/liblua.a
 	( cd $^ ; LUA_DIR=$(LUA_DIR) cmake .. )
 	make -C $^
 
 build/lua-zmq/build:
 	wget http://github.com/Neopallium/lua-zmq/tarball/master -O - | tar -xzpf - -C build
 	mv build/Neopallium-lua-* build/lua-zmq
+	# lua-zmq will look for liblua, let's link libluajit
+	ln -sf libluajit.a $(LUA_DIR)/liblua.a
+	#ln -sf libluajit.so $(LUA_DIR)/liblua.so
 	mkdir -p $@
 
 .PHONY: all crypto

@@ -1,6 +1,7 @@
 -- these are required by ZMQ
 bit = require('bit')
 debug = require('debug')
+local Crypto = require('openssl')
 local ZMQ = require('zmq')
 
 -- context
