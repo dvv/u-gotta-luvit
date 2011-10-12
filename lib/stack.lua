@@ -1,48 +1,133 @@
-local module = { }
-module.error_handler = function(req, res, err)
-  if err then
-    local reason = err
-    print('\n' .. reason .. '\n')
-    return res:send(500, reason, {
-      ['Content-Type'] = 'text/plain'
-    })
-  else
-    return res:send(404, nil, {
-      ['Content-Type'] = 'text/plain'
-    })
+local Stack
+Stack = (function()
+  local _parent_0 = nil
+  local _base_0 = {
+    use = function(lib_layer_name)
+      return require('lib/stack/' .. lib_layer_name)
+    end,
+    error_handler = function(req, res, err)
+      if err then
+        local reason = err
+        print('\n' .. reason .. '\n')
+        return res:send(500, reason, {
+          ['Content-Type'] = 'text/plain'
+        })
+      else
+        return res:send(404, nil, {
+          ['Content-Type'] = 'text/plain'
+        })
+      end
+    end,
+    run = function(self, port, host)
+      if port == nil then
+        port = 80
+      end
+      if host == nil then
+        host = '0.0.0.0'
+      end
+      local server = require('http').create_server(host, port, self.handler)
+      return server
+    end
+  }
+  _base_0.__index = _base_0
+  if _parent_0 then
+    setmetatable(_base_0, getmetatable(_parent_0).__index)
   end
-end
-module.create = function(layers)
-  local error_handler = module.error_handler
-  local handle = error_handler
-  for i = #layers, 1, -1 do
-    local layer = layers[i]
-    local child = handle
-    handle = function(req, res)
-      local fn
-      fn = function(err)
-        if err then
-          return error_handler(req, res, err)
-        else
-          return child(req, res)
+  local _class_0 = setmetatable({
+    __init = function(self, layers)
+      local error_handler = self.error_handler
+      local handler = error_handler
+      for i = #layers, 1, -1 do
+        local layer = layers[i]
+        local child = handler
+        handler = function(req, res)
+          local fn
+          fn = function(err)
+            if err then
+              return error_handler(req, res, err)
+            else
+              return child(req, res)
+            end
+          end
+          local status, err = pcall(layer, req, res, fn)
+          if err then
+            return error_handler(req, res, err)
+          end
         end
       end
-      local status, err = pcall(layer, req, res, fn)
-      if err then
-        return error_handler(req, res, err)
-      end
+      self.handler = handler
     end
+  }, {
+    __index = _base_0,
+    __call = function(cls, ...)
+      local _self_0 = setmetatable({}, _base_0)
+      cls.__init(_self_0, ...)
+      return _self_0
+    end
+  })
+  _base_0.__class = _class_0
+  return _class_0
+end)()
+local Request = require('request')
+local Response = require('response')
+local FS = require('fs')
+local noop
+noop = function() end
+Response.prototype.safe_write = function(self, chunk, cb)
+  if cb == nil then
+    cb = noop
   end
-  return handle
+  return self:write(chunk, function(err, result)
+    if not err then
+      return cb(err, result)
+    end
+    if err == 16 then
+      return self:safe_write(chunk, cb)
+    else
+      p('WRITE FAILED', err)
+      return cb(err)
+    end
+  end)
 end
-module.create_server = function(layers, port, host)
-  local stack = module.create(layers)
-  local server = require('http').create_server(host or '0.0.0.0', port, stack)
-  return server
-end
-setmetatable(module, {
-  __index = function(table, key)
-    return require('lib/stack/' .. key)
+Response.prototype.send = function(self, code, data, headers)
+  self:write_head(code, headers or { })
+  if data then
+    return self:safe_write(data, function()
+      return self:close()
+    end)
+  else
+    return self:close()
   end
-})
-return module
+end
+Response.prototype.serve_not_found = function(self)
+  return self:send(404)
+end
+Response.prototype.serve_not_modified = function(self, headers)
+  return self:send(304, nil, headers)
+end
+Response.prototype.serve_invalid_range = function(self, size)
+  return self:send(416, nil, {
+    ['Content-Range'] = 'bytes=*/' .. size
+  })
+end
+Response.prototype.render = function(self, template, data, options)
+  if data == nil then
+    data = { }
+  end
+  if options == nil then
+    options = { }
+  end
+  d('render', template, data)
+  return FS.read_file(template, function(err, text)
+    if err then
+      return self:serve_not_found()
+    else
+      local html = (text % data)
+      return self:send(200, html, {
+        ['Content-Type'] = 'text/html',
+        ['Content-Length'] = #html
+      })
+    end
+  end)
+end
+return Stack

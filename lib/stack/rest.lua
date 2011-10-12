@@ -1,133 +1,120 @@
---
--- ReST resource routing
---
-
-local JSON = require('cjson')
-
+local encode, decode
+do
+  local _table_0 = 'cjson'
+  encode = _table_0.encode
+  decode = _table_0.decode
+end
 return function(mount, options)
-
+  if mount == nil then
+    mount = '/rpc/'
+  end
+  if options == nil then
+    options = { }
+  end
   local parseUrl = require('url').parse
-
-  -- defaults
-  if not mount then mount = '/rpc/' end
-  if not options then options = {} end
-
-  -- mount should end with '/'
-  if mount:sub(#mount) ~= '/' then mount = mount .. '/' end
+  if String.sub(mount, #mount) ~= '/' then
+    mount = mount .. '/'
+  end
   local mlen = #mount
-
-  -- whether PUT /Foo/_new means POST /Foo
-  -- useful to free POST verb for pure PRC calls
-  local brand_new_id = options.put_new and options.put_new or {}
-
-  -- handler
+  local brand_new_id = options.put_new and options.put_new or { }
   return function(req, res, nxt)
-
-    -- defaults
-    if not req.uri then req.uri = parseUrl(req.url) end
-    -- none of our business unless url starts with `mount`
+    if not req.uri then
+      req.uri = parseUrl(req.url)
+    end
     local path = req.uri.pathname
-    if path:sub(1, mlen) ~= mount then return nxt() end
-
-    -- split pathname into resource name and id
-    local resource, id
+    if String.sub(path, 1, mlen) ~= mount then
+      return nxt()
+    end
+    local resource = nil
+    local id = nil
     path:sub(mlen + 1):gsub('[^/]+', function(part)
-      if not resource then resource = part:url_decode()
-      elseif not id then id = part:url_decode()
+      if not resource then
+        resource = String.url_decode(part)
+      elseif not id then
+        id = String.url_decode(part)
       end
     end)
---p('parts', resource, id)
-
-    --
-    -- determine handler method and its parameters
-    --
-
-    -- N.B. support X-HTTP-Method-Override: to ease REST for dumb clients
     local verb = req.headers['X-HTTP-Method-Override'] or req.method
-    local method, params
-
-    -- query
+    local method = nil
+    local params = nil
     if verb == 'GET' then
       method = 'get'
-      -- get by ID
       if id and id ~= brand_new_id then
-        params = {id}
-      -- query
+        params = {
+          id
+        }
       else
         method = 'query'
-        -- bulk get via POST X-HTTP-Method-Override: GET
         if is_array(req.body) then
-          params = {req.body}
-        -- query by RQL
+          params = {
+            req.body
+          }
         else
-          params = {req.uri.search}
+          params = {
+            req.uri.search
+          }
         end
       end
-
-    -- create new / update resource
     elseif verb == 'PUT' then
       method = 'update'
       if id then
-        -- add new
         if id == brand_new_id then
           method = 'add'
-          params = {req.body}
-        -- update by ID
+          params = {
+            req.body
+          }
         else
-          params = {id, req.body}
+          params = {
+            id,
+            req.body
+          }
         end
       else
-        -- bulk update via POST X-HTTP-Method-Override: PUT
         if is_array(req.body) and is_array(req.body[1]) then
-          params = {req.body[1], req.body[2]}
-        -- update by RQL
+          params = {
+            req.body[1],
+            req.body[2]
+          }
         else
-          params = {req.uri.search, req.body}
+          params = {
+            req.uri.search,
+            req.body
+          }
         end
       end
-
-    -- remove resource
     elseif verb == 'DELETE' then
       method = 'remove'
       if id and id ~= brand_new_id then
-        params = {id}
+        params = {
+          id
+        }
       else
-        -- bulk remove via POST X-HTTP-Method-Override: DELETE
         if is_array(req.body) then
-          params = {req.body}
-        -- remove by RQL
+          params = {
+            req.body
+          }
         else
-          params = {req.uri.search}
+          params = {
+            req.uri.search
+          }
         end
       end
-
-    -- arbitrary RPC to resource
     elseif verb == 'POST' then
-      -- if creation is via PUT, POST is solely for RPC
-      -- if `req.body` has truthy `jsonrpc` key -- try RPC
       if options.put_new or req.body.jsonrpc then
-        -- RPC
         method = req.body.method
         params = req.body.params
-      -- else POST is solely for creation
       else
-        -- add
         method = 'add'
-        params = {req.body}
+        params = {
+          req.body
+        }
       end
-
-    -- unsupported verb
-    else
     end
---p('PARSED', resource, method, params)
-
-    -- called after handler finishes
-    local function respond(err, result)
---p('RPC!', err, result, options, req.body)
-      local response
-      -- JSON-RPC response
+    local respond
+    respond = function(err, result)
+      local response = nil
       if options.jsonrpc or req.body.jsonrpc then
-        response = {}
+        response = { }
         if err then
           response.error = err
         elseif result == nil then
@@ -135,49 +122,38 @@ return function(mount, options)
         else
           response.result = result
         end
-        res:write_head(200, {['Content-Type'] = 'application/json'})
-      -- plain response
+        res:write_head(200, {
+          ['Content-Type'] = 'application/json'
+        })
       else
         if err then
-          res:write_head(type(err) == 'number' and err or 406, {})
+          res:write_head(type(err) == 'number' and err or 406, { })
         elseif result == nil then
-          res:write_head(404, {})
+          res:serve_not_found()
         else
           response = result
-          res:write_head(200, {['Content-Type'] = 'application/json'})
+          res:write_head(200, {
+            ['Content-Type'] = 'application/json'
+          })
         end
       end
---p('RPC!!', response)
-      if response then res:write(JSON.encode(response)) end
-      res:close()
+      if response then
+        res:write(encode(response))
+      end
+      return res:close()
     end
-
-    --
-    -- find the handler
-    --
-
-    -- bail out unless resource is found
-    local context = req.context or options.context or {}
+    local context = req.context or options.context or { }
     resource = context[resource]
     if not resource then
-      respond(404)
-      return
+      return respond(404)
     end
-    -- bail out unless resource method is supported
     if not resource[method] then
-      respond(405)
-      return
+      return respond(405)
     end
-
-    --
-    -- call the handler. signature is fn(params..., step)
-    --
-
-    if options.pass_context then Table.insert(params, 1, context) end
+    if options.pass_context then
+      Table.insert(params, 1, context)
+    end
     Table.insert(params, respond)
---p('RPC?', params)
-    resource[method](unpack(params));
-
+    return resource[method](unpack(params))
   end
-
 end

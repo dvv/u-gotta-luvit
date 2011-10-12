@@ -1,10 +1,9 @@
-local Stack = require('lib/stack-1')
-p(Stack)
+local Stack = require('lib/stack')
 
 function test1()
 
   -- test ok
-  local stack = Stack({
+  local stack = Stack.create({
     function (req, res, nxt)
       nxt()
     end,
@@ -12,34 +11,33 @@ function test1()
       res.ok()
     end,
   })
-  assert(stack.handler)
   local ok = false;
-  stack.handler(nil, {ok = function() print('1. OK') end})
+  stack(nil, {ok = function() print('1. OK') end})
 
   -- test hard error
-  stack.error_handler = function(req, res, err)
+  Stack.error_handler = function(req, res, err)
     print(err)
   end
-  local stack = Stack({
+  local stack = Stack.create({
     function (req, res, nxt)
       error('2. hard error OK')
     end,
     function (req, res, nxt)
-      error('2. hard error NAK. never should be here')
+      res.ok()
     end,
   })
-  stack.handler(nil, {send = function() end})
+  stack(nil, nil)
 
   -- test soft error
-  local stack = Stack({
+  local stack = Stack.create({
     function (req, res, nxt)
       nxt('3. soft error OK')
     end,
     function (req, res, nxt)
-      res.send()
+      res.ok()
     end,
   })
-  stack.handler(nil, {send = function(...) p('3. res.send', ...) end})
+  stack(nil, nil)
 
 end
 
