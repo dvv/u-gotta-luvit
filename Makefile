@@ -1,6 +1,7 @@
 ROOT=$(shell pwd)
 
-all: luvit json crypto zeromq
+all: luvit
+#json crypto zeromq
 
 luvit: build/luvit/build/luvit
 

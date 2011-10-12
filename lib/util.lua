@@ -149,6 +149,7 @@ local Response = require('response')
 local FS = require('fs')
 
 function Response.prototype:safe_write(chunk, cb)
+  if not cb then cb = function() end end
   self:write(chunk, function(err, result)
     if not err then cb(err, result) return end
     -- retry on EBUSY

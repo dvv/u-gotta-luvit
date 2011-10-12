@@ -5,7 +5,9 @@
 local OS = require('os')
 local UV = require('uv')
 local get_mime = require('mime').get_type
-local stat = require('fs').stat
+local FS = require('fs')
+local stat = FS.stat
+local read_file = FS.create_read_stream
 
 --
 -- setup request handler
@@ -65,6 +67,7 @@ before cache entry is set
 ]]--
 local NUM1 = 0
 local NUM2 = 0
+local NUM3 = 0
 
   -- given file, serve contents, honor Range: header
   local function serve(res, file, range, cache_it)
@@ -125,6 +128,37 @@ d("cached", NUM2, {path=filename, headers=file.headers})
           end
         end
       )
+
+      --[[ DELAYED UNTIL BACKPRESSURE IS REALIZED
+      local pipe = read_file(file.name, {
+        offset = start,
+        length = stop - start + 1,
+      })
+      pipe:on('data', function(chunk, len)
+        if cache_it then
+          parts[index] = chunk
+          index = index + 1
+        end
+        res:safe_write(chunk)
+      end)
+      pipe:on('end', function()
+        res:close()
+        if cache_it then
+NUM2 = NUM2 + 1
+d("cached", NUM2, {path=filename, headers=file.headers})
+          file.data = Table.concat(parts, '')
+          parts = nil
+        end
+      end)
+      pipe:on('error', function(err)
+        res:close()
+        parts = nil
+NUM3 = NUM3 + 1
+d("errored", NUM3, {path=filename, err=err})
+      end)
+      ]]--
+
+
     end
   end
 
