@@ -1,4 +1,5 @@
 ROOT=$(shell pwd)
+LUA_DIR=$(ROOT)/build/luvit/deps/luajit/src
 
 all: luvit
 #json crypto zeromq
@@ -15,7 +16,7 @@ build/luvit:
 json: build/lua-cjson/cjson.so
 
 build/lua-cjson/cjson.so: build/lua-cjson
-	LUA_INCLUDE_DIR=$(ROOT)/build/luvit/deps/luajit/src make -C $^
+	LUA_INCLUDE_DIR=$(LUA_DIR) make -C $^
 
 build/lua-cjson:
 	wget http://www.kyne.com.au/~mark/software/lua-cjson-1.0.3.tar.gz -O - | tar -xzpf - -C build
@@ -37,7 +38,10 @@ zeromq: build/lua-zmq/build/zmq.so
 # requires cmake :(
 #
 build/lua-zmq/build/zmq.so: build/lua-zmq/build
-	(cd $^ ; cmake .. )
+	# lua-zmq will look for liblua, let's link libluajit
+	#ln -sf $(LUA_DIR)/libluajit.a $(LUA_DIR)/liblua.a
+	ln -sf libluajit.a $(LUA_DIR)/liblua.a
+	( cd $^ ; LUA_DIR=$(LUA_DIR) cmake .. )
 	make -C $^
 
 build/lua-zmq/build:

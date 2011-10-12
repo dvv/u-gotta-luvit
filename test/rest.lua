@@ -1,4 +1,4 @@
-local JSON = require('json')
+local JSON = require('cjson')
 
 local handler = require('lib/stack/rest')('/rpc/', {
   jsonrpc = true,

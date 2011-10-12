@@ -1,4 +1,4 @@
-local String = require('lib/string')
+local String = require('lib/util')
 
 local function test1()
 
