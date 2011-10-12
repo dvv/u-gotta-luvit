@@ -32,22 +32,13 @@ build/lua-openssl:
 	wget http://github.com/zhaozg/lua-openssl/tarball/master -O - | tar -xzpf - -C build
 	mv build/zhaozg-lua-* $@
 
+#
+# requires cmake, uuid-dev, and libzmq-dev :(
+#
 zeromq: build/lua-zmq/build/zmq.so
 
-#ZEROMQ=zeromq-2.1.9
-#build/$(ZEROMQ)/src/.libs/libzmq.a: $(ZEROMQ)
-#	( cd $^ ; ./configure --prefix=/usr --enable-shared=no )
-#	make -C $^
-#	touch -c $@
-#
-#$(ZEROMQ):
-#	# TODO: need apt-get install uuid-dev
-#	wget http://download.zeromq.org/$(ZEROMQ).tar.gz -O - | tar -xzpf -
-
-#
-# requires cmake :(
-#
 build/lua-zmq/build/zmq.so: build/lua-zmq/build
+	#apt-get install uuid-dev libzmq-dev cmake
 	( cd $^ ; LUA_DIR=$(LUA_DIR) cmake .. )
 	make -C $^
 
@@ -55,8 +46,8 @@ build/lua-zmq/build:
 	wget http://github.com/Neopallium/lua-zmq/tarball/master -O - | tar -xzpf - -C build
 	mv build/Neopallium-lua-* build/lua-zmq
 	# lua-zmq will look for liblua, let's link libluajit
-	ln -sf libluajit.a $(LUA_DIR)/liblua.a
-	#ln -sf libluajit.so $(LUA_DIR)/liblua.so
+	#ln -sf libluajit.a $(LUA_DIR)/liblua.a
+	ln -sf libluajit.so $(LUA_DIR)/liblua.so
 	mkdir -p $@
 
 .PHONY: all crypto
