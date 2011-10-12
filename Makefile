@@ -34,6 +34,16 @@ build/lua-openssl:
 
 zeromq: build/lua-zmq/build/zmq.so
 
+#ZEROMQ=zeromq-2.1.9
+#build/$(ZEROMQ)/src/.libs/libzmq.a: $(ZEROMQ)
+#	( cd $^ ; ./configure --prefix=/usr --enable-shared=no )
+#	make -C $^
+#	touch -c $@
+#
+#$(ZEROMQ):
+#	# TODO: need apt-get install uuid-dev
+#	wget http://download.zeromq.org/$(ZEROMQ).tar.gz -O - | tar -xzpf -
+
 #
 # requires cmake :(
 #
