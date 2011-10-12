@@ -68,13 +68,13 @@ local function authorize(session, cb)
   end
 end
 
-local function stack() return {
+local function layers() return {
 
   -- test serving requested amount of octets
   function(req, res, nxt)
     local n = tonumber(req.url:sub(2), 10)
     if not n then nxt() return end
-    local s = (' '):rep(n)
+    local s = String.rep(' ', n)
     res:write_head(200, {
       ['Content-Type'] = 'text/plain',
       ['Content-Length'] = s:len()
@@ -88,7 +88,7 @@ local function stack() return {
   Stack.use('static')('/public/', 'public/', {
     -- should the `file` contents be cached?
     --is_cacheable = function(file) return file.size <= 65536 end,
-    --is_cacheable = function(file) return true end,
+    is_cacheable = function(file) return true end,
   }),
 
   -- handle session
@@ -140,7 +140,7 @@ local function stack() return {
 
 }end
 
-Stack(stack()):run(65401)
+Stack(layers()):run(65401)
 print('Server listening at http://localhost:65401/')
 --Stack.create_server(stack(), 65402)
 --Stack.create_server(stack(), 65403)
