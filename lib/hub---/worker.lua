@@ -23,10 +23,13 @@ local n = 0
 local time = require('os').time
 local t0 = time()
 while true do
-  local msg = sub:recv()
-  pub:send(msg)
+  local msg, err = sub:recv(ZMQ.NOBLOCK)
+p('msg', msg, err)
+  pub:send(msg, ZMQ.NOBLOCK)
   n = n + 1
   if n % 10000 == 0 then
     print((time() - t0) / n, n, #msg)
   end
 end
+
+print('atfer')
