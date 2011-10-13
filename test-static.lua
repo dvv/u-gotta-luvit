@@ -1,7 +1,14 @@
 require('lib/util')
 local Stack = require('lib/stack')
 
-local function stack() return Stack{
+local function layers() return {
+
+  -- serve static files
+  Stack.use('static')('/public/', 'public/', {
+    -- should the `file` contents be cached?
+    --is_cacheable = function(file) return file.size <= 65536 end,
+    --is_cacheable = function(file) return true end,
+  }),
 
   -- test serving requested amount of octets
   function(req, res, nxt)
@@ -17,19 +24,12 @@ local function stack() return Stack{
     end)
   end,
 
-  -- serve static files
-  Stack:use('static')('/public/', 'public/', {
-    -- should the `file` contents be cached?
-    --is_cacheable = function(file) return file.size <= 65536 end,
-    --is_cacheable = function(file) return true end,
-  }),
-
   -- report health status to load balancer
-  Stack:use('health')(),
+  Stack.use('health')(),
 
 }end
 
-stack():run(65401)
+Stack(layers()):run(65401)
 print('Server listening at http://localhost:65401/')
 --stack():run(65402)
 --stack():run(65403)

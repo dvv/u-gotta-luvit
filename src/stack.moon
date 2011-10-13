@@ -38,9 +38,9 @@ class Stack
     if err
       reason = err
       print '\n' .. reason .. '\n'
-      res\send 500, reason, ['Content-Type']: 'text/plain'
+      res\fail reason
     else
-      res\send 404, nil, ['Content-Type']: 'text/plain'
+      res\send 404
 
   --
   -- creates and returns listening HTTP server
@@ -72,12 +72,30 @@ Response.prototype.safe_write = (chunk, cb = noop) =>
       cb err
 
 Response.prototype.send = (code, data, headers) =>
-  --d('send', code, data, headers)
-  @write_head code, headers or {}
+  h = @headers or {}
+  for k, v in pairs(headers or {})
+    h[k] = v
+  p('send', code, data, h, '\n')
+  @write_head code, h or {}
+  [==[
   if data
     @safe_write data, () -> @close()
   else
     @close()
+  ]==]
+  if data
+    @write data
+  @close()
+
+-- defines response header
+Response.prototype.set_header = (name, value) =>
+  @headers = {} if not @headers
+  -- TODO: multiple values should glue
+  @headers[name] = value
+
+-- serve 500 error and reason
+Response.prototype.fail = (reason) =>
+  @send 500, reason, ['Content-Type']: 'text/plain; charset=UTF-8'
 
 -- serve 404 error
 Response.prototype.serve_not_found = () =>
@@ -104,7 +122,7 @@ Response.prototype.render = (template, data = {}, options = {}) =>
     else
       html = (text % data)
       @send 200, html, {
-        ['Content-Type']: 'text/html'
+        ['Content-Type']: 'text/html; charset=UTF-8'
         ['Content-Length']: #html
       }
 

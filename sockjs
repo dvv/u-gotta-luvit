@@ -1,0 +1,4 @@
+#!/bin/sh
+
+(cd src ; moonc -t ../lib * )
+moonc sockjs.moon && luvit sockjs.lua

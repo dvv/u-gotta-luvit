@@ -9,13 +9,9 @@ Stack = (function()
       if err then
         local reason = err
         print('\n' .. reason .. '\n')
-        return res:send(500, reason, {
-          ['Content-Type'] = 'text/plain'
-        })
+        return res:fail(reason)
       else
-        return res:send(404, nil, {
-          ['Content-Type'] = 'text/plain'
-        })
+        return res:send(404)
       end
     end,
     run = function(self, port, host)
@@ -90,14 +86,32 @@ Response.prototype.safe_write = function(self, chunk, cb)
   end)
 end
 Response.prototype.send = function(self, code, data, headers)
-  self:write_head(code, headers or { })
-  if data then
-    return self:safe_write(data, function()
-      return self:close()
-    end)
-  else
-    return self:close()
+  local h = self.headers or { }
+  for k, v in pairs(headers or { }) do
+    h[k] = v
   end
+  p('send', code, data, h, '\n')
+  self:write_head(code, h or { })
+  local _ = [==[  if data
+    @safe_write data, () -> @close()
+  else
+    @close()
+  ]==]
+  if data then
+    self:write(data)
+  end
+  return self:close()
+end
+Response.prototype.set_header = function(self, name, value)
+  if not self.headers then
+    self.headers = { }
+  end
+  self.headers[name] = value
+end
+Response.prototype.fail = function(self, reason)
+  return self:send(500, reason, {
+    ['Content-Type'] = 'text/plain; charset=UTF-8'
+  })
 end
 Response.prototype.serve_not_found = function(self)
   return self:send(404)
@@ -124,7 +138,7 @@ Response.prototype.render = function(self, template, data, options)
     else
       local html = (text % data)
       return self:send(200, html, {
-        ['Content-Type'] = 'text/html',
+        ['Content-Type'] = 'text/html; charset=UTF-8',
         ['Content-Length'] = #html
       })
     end
