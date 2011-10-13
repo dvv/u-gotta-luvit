@@ -1,28 +1,60 @@
---
--- static file server
---
-
-local OS = require('os')
 local UV = require('uv')
-local get_mime = require('mime').get_type
-local FS = require('fs')
-local stat = FS.stat
-local read_file = FS.create_read_stream
-
---
--- setup request handler
---
+local get_type
+do
+  local _table_0 = require('mime')
+  get_type = _table_0.get_type
+end
+local stat, create_read_stream
+do
+  local _table_0 = require('fs')
+  stat = _table_0.stat
+  create_read_stream = _table_0.create_read_stream
+end
+local date
+do
+  local _table_0 = require('os')
+  date = _table_0.date
+end
+local CHUNK_SIZE = 4096
+local noop
+noop = function() end
+local stream_file
+stream_file = function(path, offset, size, progress, callback)
+  return UV.fs_open(path, 'r', '0666', function(err, fd)
+    if err then
+      return callback(err)
+    end
+    local readchunk
+    readchunk = function()
+      local chunk_size = size < CHUNK_SIZE and size or CHUNK_SIZE
+      return UV.fs_read(fd, offset, chunk_size, function(err, chunk)
+        if err or #chunk == 0 then
+          callback(err)
+          return UV.fs_close(fd, noop)
+        else
+          chunk_size = #chunk
+          offset = offset + chunk_size
+          size = size - chunk_size
+          if progress then
+            return progress(chunk, readchunk)
+          else
+            return readchunk
+          end
+        end
+      end)
+    end
+    return readchunk()
+  end)
+end
 return function(mount, root, options)
-
-  if not options then options = {} end
+  if options == nil then
+    options = { }
+  end
   local max_age = options.max_age or 0
-
-  -- given Range: header, return start, end numeric pair
-  local function parse_range(range, size)
-    local start, stop, partial
-    partial = false
+  local parse_range
+  parse_range = function(range, size)
+    local partial, start, stop = false
     if range then
-      -- parse bytes=start-stop
       start, stop = range:match('bytes=(%d*)-?(%d*)')
       partial = true
     end
@@ -30,200 +62,112 @@ return function(mount, root, options)
     stop = tonumber(stop) or size - 1
     return start, stop, partial
   end
-
-  -- serve 404 error
-  local function serve_not_found(res)
-    res:send(404)
-  end
-
-  -- serve 304 not modified
-  local function serve_not_modified(res, file)
-    res:send(304, nil, file.headers)
-  end
-
-  -- serve 416 invalid range
-  local function serve_invalid_range(res, file)
-    res:send(416, nil, {
-      ['Content-Range'] = 'bytes=*/' .. file.size
-    })
-  end
-
-  -- cache entries table
-  local cache = {}
-
-  -- handler for 'change' event of all file watchers
-  local function invalidate_cache_entry(status, event, path)
-d("on_change", {status=status,event=event,path=path}, self)
-    -- invalidate cache entry and free the watcher
+  local cache = { }
+  local invalidate_cache_entry
+  invalidate_cache_entry = function(status, event, path)
+    d("on_change", {
+      status = status,
+      event = event,
+      path = path
+    }, self)
     if cache[path] then
       cache[path].watch:close()
       cache[path] = nil
     end
   end
-
---[[
-debugging stuff. wanna know how many concurrent requests do some things
-before cache entry is set
-]]--
-local NUM1 = 0
-local NUM2 = 0
-local NUM3 = 0
-
-  -- given file, serve contents, honor Range: header
-  local function serve(res, file, range, cache_it)
-    -- adjust headers
+  local NUM1 = 0
+  local NUM2 = 0
+  local NUM3 = 0
+  local serve
+  serve = function(self, file, range, cache_it)
     local headers = copy(file.headers)
-    headers['Date'] = OS.date('%c')
-    --
+    headers['Date'] = date('%c')
     local size = file.size
     local start = 0
     local stop = size - 1
-    -- range specified? adjust headers and http status for response
     if range then
       start, stop = parse_range(range, size)
-      -- limit range by file size
-      if stop >= size then stop = size - 1 end
-      -- check range validity
-      if stop < start then
-        serve_invalid_range(res, file)
-        return
+      if stop >= size then
+        stop = size - 1
       end
-      -- adjust Content-Length:
+      if stop < start then
+        return self:serve_invalid_range(file.size)
+      end
       headers['Content-Length'] = stop - start + 1
-      -- append Content-Range:
-      headers['Content-Range'] = ('bytes=%d-%d/%d'):format(start, stop, size)
-      res:write_head(206, headers)
+      headers['Content-Range'] = String.format('bytes=%d-%d/%d', start, stop, size)
+      self:write_head(206, headers)
     else
-      res:write_head(200, headers)
+      self:write_head(200, headers)
     end
-    -- serve from cache, if available
---d("serve", headers)
     if file.data then
-      res:safe_write(range and file.data.sub(start + 1, stop - start + 1) or file.data, function(...)
---d('write', ...)
-        res:close()
+      return self:safe_write(range and file.data.sub(start + 1, stop - start + 1) or file.data, function(...)
+        return self:close()
       end)
-    -- otherwise stream and possibly cache
     else
-      -- N.B. don't cache if range specified
-      if range then cache_it = false end
-      local index = 1
-      local parts = {}
-      stream_file(file.name, start, stop - start + 1,
-        -- progress
-        function(chunk, cb)
-          if cache_it then
-            parts[index] = chunk
-            index = index + 1
-          end
-          res:safe_write(chunk, cb)
-        end,
-        -- eof
-        function(err)
-          res:close()
-          if cache_it then
-NUM2 = NUM2 + 1
-d("cached", NUM2, {path=filename, headers=file.headers})
-            file.data = Table.concat(parts, '')
-          end
-        end
-      )
-
-      --[[ DELAYED UNTIL BACKPRESSURE IS REALIZED
-      local pipe = read_file(file.name, {
-        offset = start,
-        length = stop - start + 1,
-      })
-      pipe:on('data', function(chunk, len)
+      if range then
+        cache_it = false
+      end
+      local index, parts = 1, { }
+      local progress
+      progress = function(chunk, cb)
         if cache_it then
           parts[index] = chunk
           index = index + 1
         end
-        res:safe_write(chunk)
-      end)
-      pipe:on('end', function()
-        res:close()
+        return self:safe_write(chunk, cb)
+      end
+      local eof
+      eof = function(err)
+        self:close()
         if cache_it then
-NUM2 = NUM2 + 1
-d("cached", NUM2, {path=filename, headers=file.headers})
+          NUM2 = NUM2 + 1
+          d("cached", NUM2, {
+            path = filename,
+            headers = file.headers
+          })
           file.data = Table.concat(parts, '')
-          parts = nil
         end
-      end)
-      pipe:on('error', function(err)
-        res:close()
-        parts = nil
-NUM3 = NUM3 + 1
-d("errored", NUM3, {path=filename, err=err})
-      end)
-      ]]--
-
-
+      end
+      return stream_file(file.name, start, stop - start + 1, progress, eof)
     end
   end
-
-  --
-  -- request handler
-  --
   return function(req, res, nxt)
-
-    -- none of our business unless method is GET
-    -- and url starts with `mount`
     local mount_found_at = req.url:find(mount)
-    if req.method ~= 'GET' or mount_found_at ~= 1 then nxt() return end
-
-    -- map url to local filesystem filename
-    -- TODO: Path.normalize(req.url)
-    local filename = root .. req.url:sub(mount_found_at + #mount)
-
-    -- stream file, possibly caching the contents for later reuse
-    local file = cache[filename]
-
-    -- no need to serve anything if file is cached at client side
-    if file and file.headers['Last-Modified'] ==
-                req.headers['if-modified-since'] then
-      serve_not_modified(res, file)
-      return
+    if req.method ~= 'GET' or mount_found_at ~= 1 then
+      return nxt()
     end
-
+    local filename = root .. req.url:sub(mount_found_at + #mount)
+    local file = cache[filename]
+    if file and file.headers['Last-Modified'] == req.headers['if-modified-since'] then
+      return res:serve_not_modified(file.headers)
+    end
     if file then
-      serve(res, file, req.headers.range, false)
+      return serve(res, file, req.headers.range, false)
     else
-      stat(filename, function(err, stat)
+      return stat(filename, function(err, stat)
         if err then
-          serve_not_found(res)
-          return
+          return res:serve_not_found()
         end
-        -- create cache entry, even for files which contents are not
-        -- gonna be cached
-        -- collect information on file
         file = {
           name = filename,
           size = stat.size,
           mtime = stat.mtime,
-          -- FIXME: finer control client-side caching
           headers = {
-            ['Content-Type'] = get_mime(filename),
+            ['Content-Type'] = get_type(filename),
             ['Content-Length'] = stat.size,
             ['Cache-Control'] = 'public, max-age=' .. (max_age / 1000),
-            ['Last-Modified'] = OS.date('%c', stat.mtime),
-            ['Etag'] = stat.size .. '-' .. stat.mtime,
-          },
+            ['Last-Modified'] = date('%c', stat.mtime),
+            ['Etag'] = stat.size .. '-' .. stat.mtime
+          }
         }
-        -- allocate cache entry
         cache[filename] = file
-        -- should any changes in this file occur, invalidate cache entry
         file.watch = UV.new_fs_watcher(filename)
         file.watch:set_handler('change', invalidate_cache_entry)
-NUM1 = NUM1 + 1
-d("stat", NUM1, file)
-        -- shall we cache file contents?
-        local cache_it = options.is_cacheable
-          and options.is_cacheable(file)
-        serve(res, file, req.headers.range, cache_it)
+        NUM1 = NUM1 + 1
+        d("stat", NUM1, file)
+        local cache_it = options.is_cacheable and options.is_cacheable(file)
+        return serve(res, file, req.headers.range, cache_it)
       end)
     end
-
   end
-
 end

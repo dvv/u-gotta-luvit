@@ -68,13 +68,13 @@ local function authorize(session, cb)
   end
 end
 
-local function stack() return {
+local function layers() return {
 
   -- test serving requested amount of octets
   function(req, res, nxt)
     local n = tonumber(req.url:sub(2), 10)
     if not n then nxt() return end
-    local s = (' '):rep(n)
+    local s = String.rep(' ', n)
     res:write_head(200, {
       ['Content-Type'] = 'text/plain',
       ['Content-Length'] = s:len()
@@ -85,14 +85,14 @@ local function stack() return {
   end,
 
   -- serve static files
-  Stack.static('/public/', 'public/', {
+  Stack.use('static')('/public/', 'public/', {
     -- should the `file` contents be cached?
     --is_cacheable = function(file) return file.size <= 65536 end,
-    --is_cacheable = function(file) return true end,
+    is_cacheable = function(file) return true end,
   }),
 
   -- handle session
-  Stack.session({
+  Stack.use('session')({
     secret = 'change-me-in-production',
     ttl = 15 * 60 * 1000,
     -- called to get current user capabilities
@@ -100,10 +100,10 @@ local function stack() return {
   }),
 
   -- parse request body
-  Stack.body(),
+  Stack.use('body')(),
 
   -- process custom routes
-  Stack.route({
+  Stack.use('route')({
     -- serve chrome page
     ['GET /'] = function(req, res, params, nxt)
       res:render('index.html', req.context, {renderer = String.interp})
@@ -114,13 +114,13 @@ local function stack() return {
   }),
 
   -- handle authentication
-  Stack.auth('/rpc/auth', {
+  Stack.use('auth')('/rpc/auth', {
     -- called to get current user capabilities
     authenticate = authenticate,
   }),
 
   -- RPC & REST
-  Stack.rest('/rpc/'),
+  Stack.use('rest')('/rpc/'),
 
   -- GET
   function (req, res, nxt)
@@ -136,11 +136,11 @@ local function stack() return {
   end,
 
   -- report health status to load balancer
-  Stack.health(),
+  Stack.use('health')(),
 
 }end
 
-Stack.create_server(stack(), 65401)
+Stack(layers()):run(65401)
 print('Server listening at http://localhost:65401/')
 --Stack.create_server(stack(), 65402)
 --Stack.create_server(stack(), 65403)
