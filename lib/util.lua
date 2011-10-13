@@ -56,6 +56,16 @@ String.url_encode = function(str)
   end
   return str
 end
+String.parse_query = function(str)
+  local allvars = { }
+  for pair in String.gmatch(tostring(str), '[^&]+') do
+    local key, value = String.match(pair, '([^=]*)=(.*)')
+    if key then
+      allvars[key] = String.url_decode(value)
+    end
+  end
+  return allvars
+end
 _G.Table = require('table')
 _G.d = function(...)
   if env.DEBUG then

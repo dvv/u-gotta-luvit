@@ -71,11 +71,11 @@ Response.prototype.safe_write = (chunk, cb = noop) =>
       p('WRITE FAILED', err)
       cb err
 
-Response.prototype.send = (code, data, headers) =>
+Response.prototype.send = (code, data, headers, close = true) =>
   h = @headers or {}
   for k, v in pairs(headers or {})
     h[k] = v
-  p('send', code, data, h, '\n')
+  p('RESPONSE', code, data, h)
   @write_head code, h or {}
   [==[
   if data
@@ -85,7 +85,7 @@ Response.prototype.send = (code, data, headers) =>
   ]==]
   if data
     @write data
-  @close()
+  @close() if close
 
 -- defines response header
 Response.prototype.set_header = (name, value) =>
@@ -95,7 +95,11 @@ Response.prototype.set_header = (name, value) =>
 
 -- serve 500 error and reason
 Response.prototype.fail = (reason) =>
-  @send 500, reason, ['Content-Type']: 'text/plain; charset=UTF-8'
+  --p('FAIL', self, reason)
+  @send 500, reason, {
+    ['Content-Type']: 'text/plain; charset=UTF-8'
+    ['Content-Length']: #reason
+  }
 
 -- serve 404 error
 Response.prototype.serve_not_found = () =>

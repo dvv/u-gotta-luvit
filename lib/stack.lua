@@ -85,12 +85,15 @@ Response.prototype.safe_write = function(self, chunk, cb)
     end
   end)
 end
-Response.prototype.send = function(self, code, data, headers)
+Response.prototype.send = function(self, code, data, headers, close)
+  if close == nil then
+    close = true
+  end
   local h = self.headers or { }
   for k, v in pairs(headers or { }) do
     h[k] = v
   end
-  p('send', code, data, h, '\n')
+  p('RESPONSE', code, data, h)
   self:write_head(code, h or { })
   local _ = [==[  if data
     @safe_write data, () -> @close()
@@ -100,7 +103,9 @@ Response.prototype.send = function(self, code, data, headers)
   if data then
     self:write(data)
   end
-  return self:close()
+  if close then
+    return self:close()
+  end
 end
 Response.prototype.set_header = function(self, name, value)
   if not self.headers then
@@ -110,7 +115,8 @@ Response.prototype.set_header = function(self, name, value)
 end
 Response.prototype.fail = function(self, reason)
   return self:send(500, reason, {
-    ['Content-Type'] = 'text/plain; charset=UTF-8'
+    ['Content-Type'] = 'text/plain; charset=UTF-8',
+    ['Content-Length'] = #reason
   })
 end
 Response.prototype.serve_not_found = function(self)

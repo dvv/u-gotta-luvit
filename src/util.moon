@@ -53,6 +53,14 @@ String.url_encode = (str) ->
     str = String.gsub str, ' ', '+'
   str
 
+String.parse_query = (str) ->
+  allvars = {}
+  for pair in String.gmatch tostring(str), '[^&]+'
+      key, value = String.match pair, '([^=]*)=(.*)'
+      if key
+          allvars[key] = String.url_decode value
+  allvars
+
 -----------------------------------------------------------
 --
 -- collection of various helpers. when critical mass will accumulated

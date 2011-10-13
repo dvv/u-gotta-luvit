@@ -23,19 +23,19 @@ return function(routes)
     if not req.uri then
       req.uri = parseUrl(req.url)
     end
+    req.uri.query = String.parse_query(req.uri.query)
+    p('REQUEST', req.method, req.uri.pathname, req.uri.query)
     local str = req.method .. ' ' .. req.uri.pathname
     for k, v in pairs(routes) do
       local params = {
         String.match(str, k)
       }
       if params[1] ~= nil then
-        p('route: match', req.url, k, '======>', params)
         res.req = req
         v(res, nxt, unpack(params))
         return 
       end
     end
-    p('route: no match for', str)
     return nxt()
   end
 end
