@@ -93,6 +93,16 @@ local Session
 Session = (function()
   local _parent_0 = nil
   local _base_0 = {
+    get = function(sid)
+      return MAP[sid]
+    end,
+    get_or_create = function(sid, server)
+      local session = Session.get(sid)
+      if not session then
+        session = Session(sid, server)
+      end
+      return session
+    end,
     emit = function(self, ...)
       return p('EMIT', self.sid, ...)
     end,
@@ -227,31 +237,23 @@ Session = (function()
   _base_0.__class = _class_0
   return _class_0
 end)()
-Session.get = function(sid)
-  return MAP[sid]
-end
-Session.get_or_create = function(sid, server)
-  local session = Session.get(sid)
-  if not session then
-    session = Session(sid, server)
-  end
-  return session
-end
 local GenericReceiver
 GenericReceiver = (function()
   local _parent_0 = nil
   local _base_0 = {
     setUp = function(self)
-      self.thingy_end_cb = function(self)
+      self.thingy_end_cb = function()
         return self:didClose(1006, 'Connection closed')
       end
+      return self.thingy:on('end', self.thingy_end_cb)
     end,
     tearDown = function(self)
+      self.thingy:remove_listener('end', self.thingy_end_cb)
       self.thingy_end_cb = nil
     end,
     didClose = function(self, status, reason)
       if self.thingy then
-        self:tearDown(self.thingy)
+        self:tearDown()
         self.thingy = nil
       end
       if self.session then
@@ -270,7 +272,7 @@ GenericReceiver = (function()
   local _class_0 = setmetatable({
     __init = function(self, thingy)
       self.thingy = thingy
-      return self:setUp(self.thingy)
+      return self:setUp()
     end
   }, {
     __index = _base_0,
@@ -287,14 +289,11 @@ local ConnectionReceiver
 ConnectionReceiver = (function()
   local _parent_0 = GenericReceiver
   local _base_0 = {
-    doSendFrame = function(self, payload, encoding)
-      if encoding == nil then
-        encoding = 'utf-8'
-      end
+    doSendFrame = function(self, payload)
       if not self.connection then
         return false
       end
-      self.connection:write(payload, encoding)
+      self.connection:write(payload)
       return true
     end,
     didClose = function(self)
@@ -357,7 +356,7 @@ ResponseReceiver = (function()
       self.response = response
       self.options = server.options
       self.curr_response_size = 0
-      _parent_0.__init(self, self.response.connection)
+      _parent_0.__init(self, self.response)
       if self.max_response_size == nil then
         self.max_response_size = 128 * 1024
       end
@@ -448,8 +447,7 @@ JsonpReceiver = (function()
   local _class_0 = setmetatable({
     __init = function(self, res, callback)
       self.callback = callback
-      p('NEWJSONP', self, res, self.callback)
-      return _parent_0.__init(self, res, options)
+      return _parent_0.__init(self, res)
     end
   }, {
     __index = _base_0,
@@ -784,23 +782,7 @@ layers = function()
         self:send(200, 'c[3000,"Go away!"]\n')
         return 
       end
-    }),
-    function(req, res, nxt)
-      local n = tonumber(req.url:sub(2), 10)
-      if not n then
-        return nxt()
-      end
-      local s = (' '):rep(n)
-      res:write_head(200, {
-        ['Content-Type'] = 'text/plain',
-        ['Content-Length'] = {
-          s = len()
-        }
-      })
-      return res:safe_write(s, function()
-        return res:close()
-      end)
-    end
+    })
   }
 end
 Stack(layers()):run(8080)

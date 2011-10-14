@@ -91,6 +91,13 @@ MAP = {}
 
 class Session
 
+  get: (sid) -> MAP[sid]
+
+  get_or_create: (sid, server) ->
+    session = Session.get sid
+    session = Session(sid, server) if not session
+    session
+
   new: (@sid, server) =>
     @heartbeat_delay = 25000 --server.options.heartbeat_delay
     @disconnect_delay = 5000 --server.options.disconnect_delay
@@ -201,26 +208,19 @@ class Session
       if @recv
         @unregister
 
-Session.get = (sid) -> MAP[sid]
-
-Session.get_or_create = (sid, server) ->
-  session = Session.get sid
-  session = Session(sid, server) if not session
-  session
-
-
 class GenericReceiver
   new: (@thingy) =>
-    @setUp @thingy
+    --p('THINGY', @thingy)
+    @setUp()
   setUp: =>
-    @thingy_end_cb = () => @didClose 1006, 'Connection closed'
-    --!!!@thingy\addListener 'end', @thingy_end_cb
+    @thingy_end_cb = () -> @didClose 1006, 'Connection closed'
+    @thingy\on 'end', @thingy_end_cb
   tearDown: =>
-    --!!!@thingy.removeListener 'end', @thingy_end_cb
+    @thingy\remove_listener 'end', @thingy_end_cb
     @thingy_end_cb = nil
   didClose: (status, reason) =>
     if @thingy
-      @tearDown @thingy
+      @tearDown()
       @thingy = nil
     if @session
       @session\unregister status, reason
@@ -237,11 +237,11 @@ class ConnectionReceiver extends GenericReceiver
     catch x
     ]==]
     super @connection
-  doSendFrame: (payload, encoding = 'utf-8') =>
+  doSendFrame: (payload) =>
     if not @connection
       return false
     --!!!try
-    @connection\write payload, encoding
+    @connection\write payload
     return true
     --!!!catch e
     --!!!return false
@@ -260,9 +260,9 @@ class ResponseReceiver extends GenericReceiver
     @options = server.options
     @curr_response_size = 0
     --!!!try
-    --@response.connection\setKeepAlive true, 5000
+    --@response\setKeepAlive true, 5000
     --!!!catch x
-    super @response.connection
+    super @response
     if @max_response_size == nil
       @max_response_size = 128*1024 --@options.response_limit
 
@@ -299,8 +299,7 @@ class JsonpReceiver extends ResponseReceiver
   protocol: 'jsonp'
   max_response_size: 1
   new: (res, @callback) =>
-    p('NEWJSONP', self, res, @callback)
-    super res, options
+    super res
   doSendFrame: (payload) =>
     -- Yes, JSONed twice, there isn't a a better way, we must pass
     -- a string back, and the script, will be evaled() by the
@@ -552,17 +551,6 @@ layers = () -> {
       return
 
   })
-
-  -- test serving requested amount of octets
-  (req, res, nxt) ->
-    n = tonumber(req.url\sub(2), 10)
-    return nxt() if not n
-    s = (' ')\rep(n)
-    res\write_head 200, {
-      ['Content-Type']: 'text/plain'
-      ['Content-Length']: s:len()
-    }
-    res\safe_write s, () -> res\close()
 
 }
 
