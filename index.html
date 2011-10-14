@@ -26,7 +26,8 @@ $(function(){
       }
     }
 (function(){
-    var conn = new SockJS('/echo', 'xhr-streaming', {debug: true});
+    //var conn = new SockJS('/echo', 'xhr-streaming', {debug: true});
+    var conn = new SockJS('/echo', 'websocket', {debug: true});
     //var conn = new SockJS('/echo', 'iframe-htmlfile', {debug: true});
     //var conn = new SockJS('/echo', 'iframe-eventsource', {debug: true});
     conn.onopen = function() {

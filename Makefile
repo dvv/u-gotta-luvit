@@ -1,8 +1,8 @@
 ROOT=$(shell pwd)
 LUA_DIR=$(ROOT)/build/luvit/deps/luajit/src
 
-all: luvit
-#json crypto zeromq
+all: luvit json
+#crypto zeromq
 
 luvit: build/luvit/build/luvit
 
