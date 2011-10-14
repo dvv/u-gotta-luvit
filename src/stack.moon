@@ -75,7 +75,7 @@ Response.prototype.send = (code, data, headers, close = true) =>
   h = @headers or {}
   for k, v in pairs(headers or {})
     h[k] = v
-  p('RESPONSE', code, data, h)
+  --p('RESPONSE', code, data, h)
   @write_head code, h or {}
   [==[
   if data

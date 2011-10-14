@@ -24,7 +24,6 @@ return function(routes)
       req.uri = parseUrl(req.url)
     end
     req.uri.query = String.parse_query(req.uri.query)
-    p('REQUEST', req.method, req.uri.pathname, req.uri.query)
     local str = req.method .. ' ' .. req.uri.pathname
     for k, v in pairs(routes) do
       local params = {

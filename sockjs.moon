@@ -205,7 +205,7 @@ class Session
       @tryFlush()
 
   close: (status = 1000, reason = 'Normal closure') =>
-    p('CLOSE', @sid, status)
+    p('CLOSEORDERLY', @sid, status)
     if @readyState != Transport.OPEN
       return false
     @readyState = Transport.CLOSING
@@ -218,7 +218,6 @@ class Session
 
 class GenericReceiver
   new: (@thingy) =>
-    --p('THINGY', @thingy)
     @setUp()
   setUp: =>
     @thingy_end_cb = () -> @didClose 1006, 'Connection closed'
@@ -236,30 +235,6 @@ class GenericReceiver
     p('SENDBULK', messages)
     @doSendFrame 'a' .. JSON.encode(messages)
 
--- write stuff directly to connection
-class ConnectionReceiver extends GenericReceiver
-  new: (@connection) =>
-    [==[
-    try
-      @connection\setKeepAlive true, 5000
-    catch x
-    ]==]
-    super @connection
-  doSendFrame: (payload) =>
-    if not @connection
-      return false
-    --!!!try
-    @connection\write payload
-    return true
-    --!!!catch e
-    --!!!return false
-  didClose: =>
-    super()
-    --!!!try
-    @connection\close()
-    --!!!catch x
-    @connection = nil
-
 -- write stuff to response, using chunked encoding if possible
 class ResponseReceiver extends GenericReceiver
   max_response_size: nil
@@ -275,7 +250,7 @@ class ResponseReceiver extends GenericReceiver
       @max_response_size = 128*1024 --@options.response_limit
 
   doSendFrame: (payload) =>
-    p('DOSENDFRAME', payload)
+    p('DOSENDFRAME', payload, @curr_response_size, @max_response_size)
     @curr_response_size = @curr_response_size + #payload
     r = false
     --!!!try
@@ -287,6 +262,7 @@ class ResponseReceiver extends GenericReceiver
     return r
 
   didClose: =>
+    p('DIDCLOSE')
     super()
     --!!!try
     @response\close()
@@ -320,14 +296,11 @@ class HtmlFileReceiver extends ResponseReceiver
   doSendFrame: (payload) =>
     super('<script>\np(' .. JSON.encode(payload) .. ');\n</script>\r\n')
 
--- TODO:!!!
-escape_selected = () ->
-
 class EventSourceReceiver extends ResponseReceiver
   protocol: 'eventsource'
   doSendFrame: (payload) =>
     -- Beware of leading whitespace
-    --super('data: ' .. escape_selected(payload, '\r\n\x00') .. '\r\n\r\n')
+    --super('data: ' .. TODO(payload, '\r\n\x00') .. '\r\n\r\n')
     super('data: ' .. String.url_encode(payload) .. '\r\n\r\n')
 
 
@@ -357,55 +330,51 @@ layers = () -> {
   -- /echo
   Stack.use('route')({
 
-    ['POST /echo/[^./]+/([^./]+)/xhr_send1[/]?$']: (nxt, sid) =>
+    ['POST /echo/[^./]+/([^./]+)/xhr_send[/]?$']: (nxt, sid) =>
       @xhr_cors()
       @balancer_cookie()
-      --p('xhr_send', sid, @req.cookies)
       data = nil
-      @req\on 'data', (chunk) ->
-        p('chunk', chunk)
-        data = if data then data .. chunk else chunk
-      @req\on 'error', (err) ->
-        p('error', err)
-      @req\on 'end', () ->
-        p('BODY', data)
+      process = ->
+        --p('BODY', data)
         -- bail out unless such session exists
         -- FIXME: why it can't be done before end of request?
         session = Session.get sid
         return @send 404 if not session
-        p('FOUND TARGET!')
+        --p('FOUND TARGET!')
         ctype = @req.headers['content-type'] or ''
         ctype = String.match ctype, '[^;]*'
         data = nil if not allowed_types.xhr[ctype]
-        p('BODYPREDEC', data, ctype, @req.headers['content-type'])
+        --p('BODYPREDEC', data, ctype, @req.headers['content-type'])
         return @fail 'Payload expected.' if not data
         status, data = pcall JSON.decode, data
-        p('table', status, data)
+        --p('table', status, data)
         return @fail 'Broken JSON encoding.' if not status
         -- we expect array of messages
         return @fail 'Payload expected.' if not is_array data
         -- process message
         for message in *data
-          p('message', message)
+          --p('message', message)
           session\didMessage message
         -- respond ok
         @send 204, nil, {
           ['Content-Type']: 'text/plain' -- for FF
         }
+        return
+      @req\on 'error', (err) ->
+        p('error', err)
+        return
+      @req\on 'end', process
+      @req\on 'data', (chunk) ->
+        --p('chunk', chunk)
+        data = if data then data .. chunk else chunk
+        process()
+        return
       return
 
     ['POST /echo/[^./]+/([^./]+)/jsonp_send[/]?$']: (nxt, sid) =>
       @balancer_cookie()
-      --p('xhr_send', sid, @req.cookies)
       data = nil
-      @req\on 'data', (chunk) ->
-        --p('chunk', chunk)
-        data = if data then data .. chunk else chunk
-        -- FIXME: workaround while 'end' event is missing
-        --@emit 'end'
-      @req\on 'error', (err) ->
-        p('error', err)
-      @req\on 'end', ->
+      process = ->
         p('BODY', data)
         -- bail out unless such session exists
         -- FIXME: why it can't be done before end of request?
@@ -419,29 +388,36 @@ layers = () -> {
         -- FIXME: data can be uri.query.d
         if data and decoder != true
           data = decoder(data).d
-        p('BODYDEC', data, ctype)
+        --p('BODYDEC', data, ctype)
         data = nil if data == ''
         return @fail 'Payload expected.' if not data
         status, data = pcall JSON.decode, data
-        p('table', status, data)
+        --p('table', status, data)
         return @fail 'Broken JSON encoding.' if not status
         -- we expect array of messages
         return @fail 'Payload expected.' if not is_array data
         -- process message
         for message in *data
-          p('message', message)
           session\didMessage message
         -- respond ok
         @send 200, 'ok', {
           ['Content-Length']: 2
         }
         return
+      @req\on 'error', (err) ->
+        p('error', err)
+        return
+      @req\on 'end', process
+      @req\on 'data', (chunk) ->
+        --p('chunk', chunk)
+        data = if data then data .. chunk else chunk
+        process()
+        return
       return
 
-    ['POST /echo/[^./]+/([^./]+)/xhr1[/]?$']: (nxt, sid) =>
+    ['POST /echo/[^./]+/([^./]+)/xhr[/]?$']: (nxt, sid) =>
       @xhr_cors()
       @balancer_cookie()
-      p('xhr', sid, @req.cookies)
       @send 200, nil, {
         ['Content-Type']: 'application/javascript; charset=UTF-8'
       }, false
@@ -453,7 +429,6 @@ layers = () -> {
     ['POST /echo/[^./]+/([^./]+)/xhr_streaming[/]?$']: (nxt, sid) =>
       @xhr_cors()
       @balancer_cookie()
-      p('xhrstreaming', sid, @req.cookies)
       -- IE requires 2KB prefix:
       -- http://blogs.msdn.com/b/ieinternals/archive/2010/04/06/comet-streaming-in-internet-explorer-with-xmlhttprequest-and-xdomainrequest.aspx
       content = String.rep('h', 2049) .. '\n'
@@ -528,12 +503,12 @@ layers = () -> {
       @balancer_cookie()
       -- N.B. Opera needs one more new line at the start
       @send 200, '\r\n', {
-        ['Content-Type']: 'text/html; charset=UTF-8'
+        ['Content-Type']: 'text/event-stream; charset=UTF-8'
         ['Cache-Control']: 'no-store, no-cache, must-revalidate, max-age=0'
       }, false
       -- register session here
       session = Session.get_or_create sid, server
-      session\register HtmlFileReceiver self
+      session\register EventSourceReceiver self
       return
 
     ['GET /echo/[^./]+/([^./]+)/jsonp[/]?$']: (nxt, sid) =>

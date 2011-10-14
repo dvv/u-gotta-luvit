@@ -17,18 +17,20 @@ $(function(){
   <script>
     function log() {
       var args = Array.prototype.slice.call(arguments);
-      for (var i = 0; i < args.length; ++i) console.log(args[i]);
+      for (var i = 0; i < args.length; ++i) (typeof console !== 'undefined' && console.log || alert)(args[i]);
     }
 (function(){
-    var conn = new SockJS('/echo');
+    //var conn = new SockJS('/echo', 'xhr-streaming', {debug: true});
+    //var conn = new SockJS('/echo', 'iframe-htmlfile', {debug: true});
+    var conn = new SockJS('/echo', 'iframe-eventsource', {debug: true});
     conn.onopen = function() {
-      log(' [*] Open');
+      log(' [*] Open', this);
     };
     conn.onclose = function(reason) {
-      log(' [*] Closed', arguments);
+      log(' [*] Closed', this, arguments);
     };
     conn.onmessage = function(msg) {
-      log(' [*] Message', arguments);
+      log(' [*] Message', this, arguments);
     };
     window.conn = conn;
 })();

@@ -93,7 +93,6 @@ Response.prototype.send = function(self, code, data, headers, close)
   for k, v in pairs(headers or { }) do
     h[k] = v
   end
-  p('RESPONSE', code, data, h)
   self:write_head(code, h or { })
   local _ = [==[  if data
     @safe_write data, () -> @close()

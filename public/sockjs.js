@@ -329,6 +329,7 @@ utils.createIframe = function (iframe_url, error_callback) {
         tref = setTimeout(function(){onerror('onload timeout');}, 2000);
     };
     _document.body.appendChild(iframe);
+    //_document.appendChild(iframe);
     tref = setTimeout(function(){onerror('timeout');}, 5000);
     utils.attachEvent('unload', cleanup);
     return {
@@ -1282,6 +1283,7 @@ var chunkingTest = function() {
     var value;
     var t0 = 0;
     return function (base_url, callback) {
+return callback(true);
         var t1 = (new Date()).getTime();
         if (t1 - t0 > 10000) {
             chunkingTestUncached(base_url, function (v) {

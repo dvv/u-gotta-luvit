@@ -207,7 +207,7 @@ Session = (function()
       if reason == nil then
         reason = 'Normal closure'
       end
-      p('CLOSE', self.sid, status)
+      p('CLOSEORDERLY', self.sid, status)
       if self.readyState ~= Transport.OPEN then
         return false
       end
@@ -305,54 +305,13 @@ GenericReceiver = (function()
   _base_0.__class = _class_0
   return _class_0
 end)()
-local ConnectionReceiver
-ConnectionReceiver = (function()
-  local _parent_0 = GenericReceiver
-  local _base_0 = {
-    doSendFrame = function(self, payload)
-      if not self.connection then
-        return false
-      end
-      self.connection:write(payload)
-      return true
-    end,
-    didClose = function(self)
-      _parent_0.didClose(self)
-      self.connection:close()
-      self.connection = nil
-    end
-  }
-  _base_0.__index = _base_0
-  if _parent_0 then
-    setmetatable(_base_0, getmetatable(_parent_0).__index)
-  end
-  local _class_0 = setmetatable({
-    __init = function(self, connection)
-      self.connection = connection
-      _ = [==[    try
-      @connection\setKeepAlive true, 5000
-    catch x
-    ]==]
-      return _parent_0.__init(self, self.connection)
-    end
-  }, {
-    __index = _base_0,
-    __call = function(cls, ...)
-      local _self_0 = setmetatable({}, _base_0)
-      cls.__init(_self_0, ...)
-      return _self_0
-    end
-  })
-  _base_0.__class = _class_0
-  return _class_0
-end)()
 local ResponseReceiver
 ResponseReceiver = (function()
   local _parent_0 = GenericReceiver
   local _base_0 = {
     max_response_size = nil,
     doSendFrame = function(self, payload)
-      p('DOSENDFRAME', payload)
+      p('DOSENDFRAME', payload, self.curr_response_size, self.max_response_size)
       self.curr_response_size = self.curr_response_size + #payload
       local r = false
       self.response:write(payload)
@@ -363,6 +322,7 @@ ResponseReceiver = (function()
       return r
     end,
     didClose = function(self)
+      p('DIDCLOSE')
       _parent_0.didClose(self)
       self.response:close()
       self.response = nil
@@ -511,8 +471,6 @@ HtmlFileReceiver = (function()
   _base_0.__class = _class_0
   return _class_0
 end)()
-local escape_selected
-escape_selected = function() end
 local EventSourceReceiver
 EventSourceReceiver = (function()
   local _parent_0 = ResponseReceiver
@@ -572,40 +530,26 @@ local layers
 layers = function()
   return {
     Stack.use('route')({
-      ['POST /echo/[^./]+/([^./]+)/xhr_send1[/]?$'] = function(self, nxt, sid)
+      ['POST /echo/[^./]+/([^./]+)/xhr_send[/]?$'] = function(self, nxt, sid)
         self:xhr_cors()
         self:balancer_cookie()
         local data = nil
-        self.req:on('data', function(chunk)
-          p('chunk', chunk)
-          if data then
-            data = data .. chunk
-          else
-            data = chunk
-          end
-        end)
-        self.req:on('error', function(err)
-          return p('error', err)
-        end)
-        self.req:on('end', function()
-          p('BODY', data)
+        local process
+        process = function()
           local session = Session.get(sid)
           if not session then
             return self:send(404)
           end
-          p('FOUND TARGET!')
           local ctype = self.req.headers['content-type'] or ''
           ctype = String.match(ctype, '[^;]*')
           if not allowed_types.xhr[ctype] then
             data = nil
           end
-          p('BODYPREDEC', data, ctype, self.req.headers['content-type'])
           if not data then
             return self:fail('Payload expected.')
           end
           local status
           status, data = pcall(JSON.decode, data)
-          p('table', status, data)
           if not status then
             return self:fail('Broken JSON encoding.')
           end
@@ -615,29 +559,34 @@ layers = function()
           local _list_0 = data
           for _index_0 = 1, #_list_0 do
             local message = _list_0[_index_0]
-            p('message', message)
             session:didMessage(message)
           end
-          return self:send(204, nil, {
+          self:send(204, nil, {
             ['Content-Type'] = 'text/plain'
           })
+          return 
+        end
+        self.req:on('error', function(err)
+          p('error', err)
+          return 
         end)
-        return 
-      end,
-      ['POST /echo/[^./]+/([^./]+)/jsonp_send[/]?$'] = function(self, nxt, sid)
-        self:balancer_cookie()
-        local data = nil
+        self.req:on('end', process)
         self.req:on('data', function(chunk)
           if data then
             data = data .. chunk
           else
             data = chunk
           end
+          process()
+          return 
         end)
-        self.req:on('error', function(err)
-          return p('error', err)
-        end)
-        self.req:on('end', function()
+        return 
+      end,
+      ['POST /echo/[^./]+/([^./]+)/jsonp_send[/]?$'] = function(self, nxt, sid)
+        self:balancer_cookie()
+        local data = nil
+        local process
+        process = function()
           p('BODY', data)
           local session = Session.get(sid)
           if not session then
@@ -652,7 +601,6 @@ layers = function()
           if data and decoder ~= true then
             data = decoder(data).d
           end
-          p('BODYDEC', data, ctype)
           if data == '' then
             data = nil
           end
@@ -661,7 +609,6 @@ layers = function()
           end
           local status
           status, data = pcall(JSON.decode, data)
-          p('table', status, data)
           if not status then
             return self:fail('Broken JSON encoding.')
           end
@@ -671,20 +618,32 @@ layers = function()
           local _list_0 = data
           for _index_0 = 1, #_list_0 do
             local message = _list_0[_index_0]
-            p('message', message)
             session:didMessage(message)
           end
           self:send(200, 'ok', {
             ['Content-Length'] = 2
           })
           return 
+        end
+        self.req:on('error', function(err)
+          p('error', err)
+          return 
+        end)
+        self.req:on('end', process)
+        self.req:on('data', function(chunk)
+          if data then
+            data = data .. chunk
+          else
+            data = chunk
+          end
+          process()
+          return 
         end)
         return 
       end,
-      ['POST /echo/[^./]+/([^./]+)/xhr1[/]?$'] = function(self, nxt, sid)
+      ['POST /echo/[^./]+/([^./]+)/xhr[/]?$'] = function(self, nxt, sid)
         self:xhr_cors()
         self:balancer_cookie()
-        p('xhr', sid, self.req.cookies)
         self:send(200, nil, {
           ['Content-Type'] = 'application/javascript; charset=UTF-8'
         }, false)
@@ -695,7 +654,6 @@ layers = function()
       ['POST /echo/[^./]+/([^./]+)/xhr_streaming[/]?$'] = function(self, nxt, sid)
         self:xhr_cors()
         self:balancer_cookie()
-        p('xhrstreaming', sid, self.req.cookies)
         local content = String.rep('h', 2049) .. '\n'
         self:send(200, content, {
           ['Content-Type'] = 'application/javascript; charset=UTF-8'
@@ -769,11 +727,11 @@ layers = function()
       ['GET /echo/[^./]+/([^./]+)/eventsource[/]?$'] = function(self, nxt, sid)
         self:balancer_cookie()
         self:send(200, '\r\n', {
-          ['Content-Type'] = 'text/html; charset=UTF-8',
+          ['Content-Type'] = 'text/event-stream; charset=UTF-8',
           ['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         }, false)
         local session = Session.get_or_create(sid, server)
-        session:register(HtmlFileReceiver(self))
+        session:register(EventSourceReceiver(self))
         return 
       end,
       ['GET /echo/[^./]+/([^./]+)/jsonp[/]?$'] = function(self, nxt, sid)
