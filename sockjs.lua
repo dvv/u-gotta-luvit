@@ -14,6 +14,11 @@ do
   date = _table_0.date
   time = _table_0.time
 end
+local _error = error
+local error
+error = function(...)
+  return p('FOCKING ERROR', ...)
+end
 local _ = [==[BaseUrlGreeting
 ---ChunkingTest
 EventSource
@@ -60,7 +65,7 @@ local htmlfile_template = [[<!doctype html>
 ]]
 htmlfile_template = htmlfile_template .. String.rep(' ', 1024 - #htmlfile_template + 14) .. '\r\n\r\n'
 local server = { }
-local sockjs_url = '/fooooo'
+local sockjs_url = '/public/sockjs.js'
 local etag = '/fooooo'
 local allowed_types = {
   xhr = {
@@ -71,8 +76,9 @@ local allowed_types = {
     [''] = JSON.decode
   },
   jsonp = {
-    ['application/x-www-form-urlencoded'] = JSON.decode,
-    [''] = JSON.decode
+    ['application/x-www-form-urlencoded'] = String.parse_query,
+    ['text/plain'] = true,
+    [''] = true
   }
 }
 local closeFrame
@@ -107,13 +113,14 @@ Session = (function()
       return p('EMIT', self.sid, ...)
     end,
     register = function(self, recv)
-      p('REGISTER')
+      p('REGISTER', self.sid)
       if self.recv then
         recv:doSendFrame(closeFrame(2010, 'Another connection still open'))
         return 
       end
       if self.readyState == Transport.CLOSING then
         recv:doSendFrame(self.close_frame)
+        self.to_tref = set_timeout(self.disconnect_delay, self.timeout_cb)
         return 
       end
       self.recv = recv
@@ -129,15 +136,17 @@ Session = (function()
       return 
     end,
     unregister = function(self)
-      p('UNREGISTER')
+      p('UNREGISTER', self.sid)
       self.recv.session = nil
       self.recv = nil
       if self.to_tref then
         clear_timer(self.to_tref)
       end
+      self.to_tref = set_timeout(self.disconnect_delay, self.timeout_cb)
       return 
     end,
     tryFlush = function(self)
+      p('TRYFLUSH', self.sid, self.send_buffer)
       if #self.send_buffer > 0 then
         local sb = self.send_buffer
         self.send_buffer = { }
@@ -146,12 +155,14 @@ Session = (function()
         if self.to_tref then
           clear_timer(self.to_tref)
         end
-        _ = [==[      x = ->
-        if @recv
-            @to_tref = set_timeout @heartbeat_delay, x
-            @recv\doSendFrame 'h'
-      @to_tref = set_timeout @heartbeat_delay, x
-      ]==]
+        local x
+        x = function()
+          if self.recv then
+            self.to_tref = set_timeout(self.heartbeat_delay, x)
+            return self.recv:doSendFrame('h')
+          end
+        end
+        self.to_tref = set_timeout(self.heartbeat_delay, x)
       end
       return 
     end,
@@ -171,14 +182,20 @@ Session = (function()
       return 
     end,
     didMessage = function(self, payload)
-      p('INCOME', payload)
+      p('INCOME', self.sid, payload)
+      if self.readyState == Transport.OPEN then
+        self:emit('message', payload)
+        self:send(payload)
+      end
       return 
     end,
     send = function(self, payload)
+      p('SEND?', self.sid, payload)
       if self.readyState ~= Transport.OPEN then
         error('INVALID_STATE_ERR')
       end
-      Table.insert(self:send_buffer(tostring(payload)))
+      p('SEND!', self.sid, payload)
+      Table.insert(self.send_buffer, tostring(payload))
       if self.recv then
         return self:tryFlush()
       end
@@ -190,6 +207,7 @@ Session = (function()
       if reason == nil then
         reason = 'Normal closure'
       end
+      p('CLOSE', self.sid, status)
       if self.readyState ~= Transport.OPEN then
         return false
       end
@@ -219,11 +237,13 @@ Session = (function()
       if self.sid then
         MAP[self.sid] = self
       end
-      return [==[    @timeout_cb = => @didTimeout()
-    @to_tref = set_timeout @disconnect_delay, @timeout_cb
-    @emit_open = =>
+      self.timeout_cb = function()
+        return self:didTimeout()
+      end
+      self.to_tref = set_timeout(self.disconnect_delay, self.timeout_cb)
+      return [==[    @emit_open = =>
       @emit_open = nil
-      --server.emit 'connection', self
+    --server.emit 'connection', self
     ]==]
     end
   }, {
@@ -262,7 +282,7 @@ GenericReceiver = (function()
     end,
     doSendBulk = function(self, messages)
       p('SENDBULK', messages)
-      return self:doSendFrame('a' + JSON.encode(messages))
+      return self:doSendFrame('a' .. JSON.encode(messages))
     end
   }
   _base_0.__index = _base_0
@@ -332,6 +352,7 @@ ResponseReceiver = (function()
   local _base_0 = {
     max_response_size = nil,
     doSendFrame = function(self, payload)
+      p('DOSENDFRAME', payload)
       self.curr_response_size = self.curr_response_size + #payload
       local r = false
       self.response:write(payload)
@@ -498,7 +519,7 @@ EventSourceReceiver = (function()
   local _base_0 = {
     protocol = 'eventsource',
     doSendFrame = function(self, payload)
-      return _parent_0.doSendFrame(self, 'data: ' .. escape_selected(payload, '\r\n\x00') .. '\r\n\r\n')
+      return _parent_0.doSendFrame(self, 'data: ' .. String.url_encode(payload) .. '\r\n\r\n')
     end
   }
   _base_0.__index = _base_0
@@ -550,15 +571,10 @@ local sids = { }
 local layers
 layers = function()
   return {
-    Stack.use('static')('/public/', 'public/', { }),
     Stack.use('route')({
-      ['POST /echo/[^./]+/([^./]+)/xhr_send[/]?$'] = function(self, nxt, sid)
+      ['POST /echo/[^./]+/([^./]+)/xhr_send1[/]?$'] = function(self, nxt, sid)
         self:xhr_cors()
         self:balancer_cookie()
-        local session = Session.get(sid)
-        if not session then
-          return self:send(404)
-        end
         local data = nil
         self.req:on('data', function(chunk)
           p('chunk', chunk)
@@ -573,9 +589,71 @@ layers = function()
         end)
         self.req:on('end', function()
           p('BODY', data)
+          local session = Session.get(sid)
+          if not session then
+            return self:send(404)
+          end
+          p('FOUND TARGET!')
           local ctype = self.req.headers['content-type'] or ''
-          ctype = String.match(ctype, '[^;]-')
+          ctype = String.match(ctype, '[^;]*')
           if not allowed_types.xhr[ctype] then
+            data = nil
+          end
+          p('BODYPREDEC', data, ctype, self.req.headers['content-type'])
+          if not data then
+            return self:fail('Payload expected.')
+          end
+          local status
+          status, data = pcall(JSON.decode, data)
+          p('table', status, data)
+          if not status then
+            return self:fail('Broken JSON encoding.')
+          end
+          if not is_array(data) then
+            return self:fail('Payload expected.')
+          end
+          local _list_0 = data
+          for _index_0 = 1, #_list_0 do
+            local message = _list_0[_index_0]
+            p('message', message)
+            session:didMessage(message)
+          end
+          return self:send(204, nil, {
+            ['Content-Type'] = 'text/plain'
+          })
+        end)
+        return 
+      end,
+      ['POST /echo/[^./]+/([^./]+)/jsonp_send[/]?$'] = function(self, nxt, sid)
+        self:balancer_cookie()
+        local data = nil
+        self.req:on('data', function(chunk)
+          if data then
+            data = data .. chunk
+          else
+            data = chunk
+          end
+        end)
+        self.req:on('error', function(err)
+          return p('error', err)
+        end)
+        self.req:on('end', function()
+          p('BODY', data)
+          local session = Session.get(sid)
+          if not session then
+            return self:send(404)
+          end
+          local ctype = self.req.headers['content-type'] or ''
+          ctype = String.match(ctype, '[^;]*')
+          local decoder = allowed_types.jsonp[ctype]
+          if not decoder then
+            data = nil
+          end
+          if data and decoder ~= true then
+            data = decoder(data).d
+          end
+          p('BODYDEC', data, ctype)
+          if data == '' then
             data = nil
           end
           if not data then
@@ -594,72 +672,16 @@ layers = function()
           for _index_0 = 1, #_list_0 do
             local message = _list_0[_index_0]
             p('message', message)
-            session.didMessage(message)
+            session:didMessage(message)
           end
-          return self:send(204, nil, {
-            ['Content-Type'] = 'text/plain'
+          self:send(200, 'ok', {
+            ['Content-Length'] = 2
           })
+          return 
         end)
         return 
       end,
-      ['POST /echo/[^./]+/([^./]+)/jsonp_send[/]?$'] = function(self, nxt, sid)
-        self:balancer_cookie()
-        local session = Session.get(sid)
-        if not session then
-          return self:send(404)
-        end
-        local data = nil
-        self.req:on('data', function(chunk)
-          if data then
-            data = data .. chunk
-          else
-            data = chunk
-          end
-        end)
-        self.req:on('error', function(err)
-          return p('error', err)
-        end)
-        if (function()
-          if data == '' then
-            if not data then
-              return self:fail('Payload expected.')
-            end
-            local status
-            status, data = pcall(JSON.decode, data)
-            p('table', status, data)
-            if not status then
-              return self:fail('Broken JSON encoding.')
-            end
-            if not is_array(data) then
-              return self:fail('Payload expected.')
-            end
-            local _list_0 = data
-            for _index_0 = 1, #_list_0 do
-              local message = _list_0[_index_0]
-              p('message', message)
-              session.didMessage(message)
-            end
-            return self:send(200, 'ok', {
-              ['Content-Length'] = 2
-            })
-          end
-        end)() then
-          self.req:on('end', function()
-            p('BODY', data)
-            local ctype = self.req.headers['content-type'] or ''
-            ctype = String.match(ctype, '[^;]-')
-            if not allowed_types.jsonp[ctype] then
-              data = nil
-            end
-            if data and String.sub(data, 1, 2) == 'd=' then
-              data = String.parse_query(data).d
-            end
-            data = nil
-          end)
-        end
-        return 
-      end,
-      ['POST /echo/[^./]+/([^./]+)/xhr[/]?$'] = function(self, nxt, sid)
+      ['POST /echo/[^./]+/([^./]+)/xhr1[/]?$'] = function(self, nxt, sid)
         self:xhr_cors()
         self:balancer_cookie()
         p('xhr', sid, self.req.cookies)
@@ -781,6 +803,14 @@ layers = function()
       ['POST /close[/]?'] = function(self, nxt)
         self:send(200, 'c[3000,"Go away!"]\n')
         return 
+      end,
+      ['GET /$'] = function(self, nxt)
+        return self:render('index.html', self.req.context)
+      end
+    }),
+    Stack.use('static')('/public/', 'public/', {
+      is_cacheable = function(file)
+        return true
       end
     })
   }

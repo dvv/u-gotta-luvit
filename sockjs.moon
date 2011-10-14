@@ -5,6 +5,9 @@ import set_timeout, clear_timer from require 'timer'
 JSON = require 'cjson'
 import date, time from require 'os'
 
+_error = error
+error = (...) -> p('FOCKING ERROR', ...)
+
 -- tests
 [==[
 BaseUrlGreeting
@@ -64,7 +67,7 @@ htmlfile_template =  htmlfile_template .. String.rep(' ', 1024 - #htmlfile_templ
 
 server = {
 }
-sockjs_url = '/fooooo'
+sockjs_url = '/public/sockjs.js'
 etag = '/fooooo'
 allowed_types = {
   xhr:
@@ -74,8 +77,9 @@ allowed_types = {
     ['T']: JSON.decode
     ['']: JSON.decode
   jsonp:
-    ['application/x-www-form-urlencoded']: JSON.decode
-    ['']: JSON.decode
+    ['application/x-www-form-urlencoded']: String.parse_query
+    ['text/plain']: true
+    ['']: true
 }
 
 closeFrame = (status, reason) -> 'c' .. JSON.encode({status, reason})
@@ -107,25 +111,25 @@ class Session
     @readyState = Transport.CONNECTING
     if @sid
         MAP[@sid] = self
-    [==[
-    @timeout_cb = => @didTimeout()
+    @timeout_cb = -> @didTimeout()
     @to_tref = set_timeout @disconnect_delay, @timeout_cb
+    [==[
     @emit_open = =>
       @emit_open = nil
-      --server.emit 'connection', self
+    --server.emit 'connection', self
     ]==]
 
   emit: (...) =>
     p('EMIT', @sid, ...)
 
   register: (recv) =>
-    p('REGISTER')
+    p('REGISTER', @sid)
     if @recv
-      recv\doSendFrame closeFrame 2010, 'Another connection still open'
+      recv\doSendFrame closeFrame(2010, 'Another connection still open')
       return
     if @readyState == Transport.CLOSING
       recv\doSendFrame @close_frame
-      --!!!@to_tref = set_timeout @disconnect_delay, @timeout_cb
+      @to_tref = set_timeout @disconnect_delay, @timeout_cb
       return
     -- registering. From now on 'unregister' is responsible for
     -- setting the timer.
@@ -147,15 +151,16 @@ class Session
     return
 
   unregister: =>
-    p('UNREGISTER')
+    p('UNREGISTER', @sid)
     @recv.session = nil
     @recv = nil
     if @to_tref
       clear_timer @to_tref
-    --!!!@to_tref = set_timeout @disconnect_delay, @timeout_cb
+    @to_tref = set_timeout @disconnect_delay, @timeout_cb
     return
 
   tryFlush: =>
+    p('TRYFLUSH', @sid, @send_buffer)
     if #@send_buffer > 0
       sb = @send_buffer
       @send_buffer = {}
@@ -163,13 +168,11 @@ class Session
     else
       if @to_tref
         clear_timer @to_tref
-      [==[
       x = ->
         if @recv
-            @to_tref = set_timeout @heartbeat_delay, x
-            @recv\doSendFrame 'h'
+          @to_tref = set_timeout @heartbeat_delay, x
+          @recv\doSendFrame 'h'
       @to_tref = set_timeout @heartbeat_delay, x
-      ]==]
     return
 
   didTimeout: =>
@@ -185,19 +188,24 @@ class Session
     return
 
   didMessage: (payload) =>
-    p('INCOME', payload)
-    --!!!if @readyState == Transport.OPEN
-    --!!!  @emit 'message', payload
+    p('INCOME', @sid, payload)
+    if @readyState == Transport.OPEN
+      @emit 'message', payload
+      -- FIXME: this is for testing echo server!!!
+      @send payload
     return
 
   send: (payload) =>
+    p('SEND?', @sid, payload)
     if @readyState != Transport.OPEN
       error 'INVALID_STATE_ERR'
-    Table.insert @send_buffer tostring(payload)
+    p('SEND!', @sid, payload)
+    Table.insert @send_buffer, tostring(payload)
     if @recv
       @tryFlush()
 
   close: (status = 1000, reason = 'Normal closure') =>
+    p('CLOSE', @sid, status)
     if @readyState != Transport.OPEN
       return false
     @readyState = Transport.CLOSING
@@ -226,7 +234,7 @@ class GenericReceiver
       @session\unregister status, reason
   doSendBulk: (messages) =>
     p('SENDBULK', messages)
-    @doSendFrame 'a' + JSON.encode(messages)
+    @doSendFrame 'a' .. JSON.encode(messages)
 
 -- write stuff directly to connection
 class ConnectionReceiver extends GenericReceiver
@@ -267,6 +275,7 @@ class ResponseReceiver extends GenericReceiver
       @max_response_size = 128*1024 --@options.response_limit
 
   doSendFrame: (payload) =>
+    p('DOSENDFRAME', payload)
     @curr_response_size = @curr_response_size + #payload
     r = false
     --!!!try
@@ -289,7 +298,7 @@ class ResponseReceiver extends GenericReceiver
 class XhrStreamingReceiver extends ResponseReceiver
   protocol: 'xhr-streaming'
   doSendFrame: (payload) =>
-    super payload .. '\n'
+    super(payload .. '\n')
 
 class XhrPollingReceiver extends XhrStreamingReceiver
   protocol: 'xhr'
@@ -304,12 +313,12 @@ class JsonpReceiver extends ResponseReceiver
     -- Yes, JSONed twice, there isn't a a better way, we must pass
     -- a string back, and the script, will be evaled() by the
     -- browser.
-    super @callback .. '(' .. JSON.encode(payload) .. ');\r\n'
+    super(@callback .. '(' .. JSON.encode(payload) .. ');\r\n')
 
 class HtmlFileReceiver extends ResponseReceiver
   protocol: 'htmlfile'
   doSendFrame: (payload) =>
-    super '<script>\np(' .. JSON.encode(payload) .. ');\n</script>\r\n'
+    super('<script>\np(' .. JSON.encode(payload) .. ');\n</script>\r\n')
 
 -- TODO:!!!
 escape_selected = () ->
@@ -318,7 +327,8 @@ class EventSourceReceiver extends ResponseReceiver
   protocol: 'eventsource'
   doSendFrame: (payload) =>
     -- Beware of leading whitespace
-    super 'data: ' .. escape_selected(payload, '\r\n\x00') .. '\r\n\r\n'
+    --super('data: ' .. escape_selected(payload, '\r\n\x00') .. '\r\n\r\n')
+    super('data: ' .. String.url_encode(payload) .. '\r\n\r\n')
 
 
 Response = require('response')
@@ -344,24 +354,13 @@ sids = {}
 
 layers = () -> {
 
-  -- serve static files
-  Stack.use('static')('/public/', 'public/', {
-    -- should the `file` contents be cached?
-    --is_cacheable = function(file) return file.size <= 65536 end,
-    --is_cacheable = function(file) return true end,
-  }),
-
   -- /echo
   Stack.use('route')({
 
-    ['POST /echo/[^./]+/([^./]+)/xhr_send[/]?$']: (nxt, sid) =>
+    ['POST /echo/[^./]+/([^./]+)/xhr_send1[/]?$']: (nxt, sid) =>
       @xhr_cors()
       @balancer_cookie()
       --p('xhr_send', sid, @req.cookies)
-      -- bail out unless such session exists
-      session = Session.get sid
-      return @send 404 if not session
-      --
       data = nil
       @req\on 'data', (chunk) ->
         p('chunk', chunk)
@@ -370,9 +369,15 @@ layers = () -> {
         p('error', err)
       @req\on 'end', () ->
         p('BODY', data)
+        -- bail out unless such session exists
+        -- FIXME: why it can't be done before end of request?
+        session = Session.get sid
+        return @send 404 if not session
+        p('FOUND TARGET!')
         ctype = @req.headers['content-type'] or ''
-        ctype = String.match ctype, '[^;]-'
+        ctype = String.match ctype, '[^;]*'
         data = nil if not allowed_types.xhr[ctype]
+        p('BODYPREDEC', data, ctype, @req.headers['content-type'])
         return @fail 'Payload expected.' if not data
         status, data = pcall JSON.decode, data
         p('table', status, data)
@@ -382,7 +387,7 @@ layers = () -> {
         -- process message
         for message in *data
           p('message', message)
-          session.didMessage message
+          session\didMessage message
         -- respond ok
         @send 204, nil, {
           ['Content-Type']: 'text/plain' -- for FF
@@ -392,24 +397,30 @@ layers = () -> {
     ['POST /echo/[^./]+/([^./]+)/jsonp_send[/]?$']: (nxt, sid) =>
       @balancer_cookie()
       --p('xhr_send', sid, @req.cookies)
-      -- bail out unless such session exists
-      session = Session.get sid
-      return @send 404 if not session
       data = nil
       @req\on 'data', (chunk) ->
         --p('chunk', chunk)
         data = if data then data .. chunk else chunk
+        -- FIXME: workaround while 'end' event is missing
+        --@emit 'end'
       @req\on 'error', (err) ->
         p('error', err)
-      @req\on 'end', () ->
+      @req\on 'end', ->
         p('BODY', data)
+        -- bail out unless such session exists
+        -- FIXME: why it can't be done before end of request?
+        session = Session.get sid
+        return @send 404 if not session
+        --p('FOUND TARGET!')
         ctype = @req.headers['content-type'] or ''
-        ctype = String.match ctype, '[^;]-'
-        data = nil if not allowed_types.jsonp[ctype]
+        ctype = String.match ctype, '[^;]*'
+        decoder = allowed_types.jsonp[ctype]
+        data = nil if not decoder
         -- FIXME: data can be uri.query.d
-        if data and String.sub(data, 1, 2) == 'd='
-          data = String.parse_query(data).d
-        data = nil if if data == ''
+        if data and decoder != true
+          data = decoder(data).d
+        p('BODYDEC', data, ctype)
+        data = nil if data == ''
         return @fail 'Payload expected.' if not data
         status, data = pcall JSON.decode, data
         p('table', status, data)
@@ -419,14 +430,15 @@ layers = () -> {
         -- process message
         for message in *data
           p('message', message)
-          session.didMessage message
+          session\didMessage message
         -- respond ok
         @send 200, 'ok', {
           ['Content-Length']: 2
         }
+        return
       return
 
-    ['POST /echo/[^./]+/([^./]+)/xhr[/]?$']: (nxt, sid) =>
+    ['POST /echo/[^./]+/([^./]+)/xhr1[/]?$']: (nxt, sid) =>
       @xhr_cors()
       @balancer_cookie()
       p('xhr', sid, @req.cookies)
@@ -550,6 +562,17 @@ layers = () -> {
       @send 200, 'c[3000,"Go away!"]\n'
       return
 
+    -- serve chrome page
+    ['GET /$']: (nxt) =>
+      @render 'index.html', @req.context
+
+  })
+
+  -- serve static files
+  Stack.use('static')('/public/', 'public/', {
+    -- should the `file` contents be cached?
+    --is_cacheable: (file) file.size <= 65536
+    is_cacheable: (file) -> true
   })
 
 }

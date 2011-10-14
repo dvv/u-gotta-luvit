@@ -13,6 +13,26 @@ $(function(){
 
 });
   </script>
+  <script src="public/sockjs.js"></script>
+  <script>
+    function log() {
+      var args = Array.prototype.slice.call(arguments);
+      for (var i = 0; i < args.length; ++i) console.log(args[i]);
+    }
+(function(){
+    var conn = new SockJS('/echo');
+    conn.onopen = function() {
+      log(' [*] Open');
+    };
+    conn.onclose = function(reason) {
+      log(' [*] Closed', arguments);
+    };
+    conn.onmessage = function(msg) {
+      log(' [*] Message', arguments);
+    };
+    window.conn = conn;
+})();
+   </script>
 </head>
 <body>
 <h2><a href="https://github.com/dvv/u-gotta-luvit">U-Gotta-Luvit</a> example</h2>
