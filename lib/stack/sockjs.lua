@@ -1,5 +1,3 @@
-require('lib/util')
-local Stack = require('lib/stack')
 local EventEmitter = setmetatable({ }, {
   __index = require('emitter').meta
 })
@@ -16,11 +14,7 @@ do
   date = _table_0.date
   time = _table_0.time
 end
-local _error = error
-local error
-error = function(...)
-  return p('BADBADBAD ERROR', ...)
-end
+local Math = require('math')
 local iframe_template = [[<!DOCTYPE html>
 <html>
 <head>
@@ -101,7 +95,6 @@ Session = (function()
       return session
     end,
     register = function(self, recv)
-      p('REGISTER', self.sid)
       if self.recv then
         recv:send_frame(Transport.closing_frame(2010, 'Another connection still open'))
         return 
@@ -112,7 +105,7 @@ Session = (function()
       end
       if self.readyState == Transport.CLOSING then
         recv:send_frame(self.close_frame)
-        self.to_tref = set_timeout(self.disconnect_delay, self.timeout_cb)
+        self.to_tref = set_timeout(self.disconnect_delay, self.ontimeout)
         return 
       end
       self.recv = recv
@@ -126,21 +119,18 @@ Session = (function()
       return 
     end,
     unregister = function(self)
-      p('UNREGISTER', self.sid)
       self.recv.session = nil
       self.recv = nil
       if self.to_tref then
         clear_timer(self.to_tref)
       end
-      self.to_tref = set_timeout(self.disconnect_delay, self.timeout_cb)
+      self.to_tref = set_timeout(self.disconnect_delay, self.ontimeout)
       return 
     end,
     flush = function(self)
-      p('TRYFLUSH', self.sid, self.send_buffer)
       if #self.send_buffer > 0 then
         local messages = self.send_buffer
         self.send_buffer = { }
-        p('SENDBULK', messages)
         self.recv:send_frame('a' .. JSON.encode(messages))
       else
         if self.to_tref then
@@ -157,7 +147,7 @@ Session = (function()
       end
       return 
     end,
-    didTimeout = function(self)
+    ontimeout = function(self)
       if self.readyState ~= Transport.CONNECTING and self.readyState ~= Transport.OPEN and self.readyState ~= Transport.CLOSING then
         error('INVALID_STATE_ERR')
       end
@@ -173,7 +163,6 @@ Session = (function()
       return 
     end,
     onmessage = function(self, payload)
-      p('INCOME', self.sid, payload)
       if self.readyState == Transport.OPEN then
         self:emit('message', payload)
       end
@@ -183,7 +172,6 @@ Session = (function()
       if self.readyState ~= Transport.OPEN then
         return false
       end
-      p('SEND', self.sid, payload)
       Table.insert(self.send_buffer, tostring(payload))
       if self.recv then
         self:flush()
@@ -197,7 +185,6 @@ Session = (function()
       if reason == nil then
         reason = 'Normal closure'
       end
-      p('CLOSE', self.sid, status)
       if self.readyState ~= Transport.OPEN then
         return false
       end
@@ -225,10 +212,7 @@ Session = (function()
       if self.sid then
         sessions[self.sid] = self
       end
-      self.timeout_cb = function()
-        return self:didTimeout()
-      end
-      self.to_tref = set_timeout(self.disconnect_delay, self.timeout_cb)
+      self.to_tref = set_timeout(self.disconnect_delay, self.ontimeout)
       self.emit_connection_event = function()
         self.emit_connection_event = nil
         return options.onconnection(self)
@@ -272,7 +256,6 @@ handle_balancer_cookie = function(self)
 end
 local Response = require('response')
 Response.prototype.do_reasoned_close = function(self, status, reason)
-  p('DOCLOSE', status, reason)
   self:close()
   if self.session then
     return self.session:unregister(status, reason)
@@ -280,7 +263,6 @@ Response.prototype.do_reasoned_close = function(self, status, reason)
 end
 Response.prototype.write_frame = function(self, payload)
   self.curr_size = self.curr_size + #payload
-  p('DOSENDFRAME', payload, self.curr_size, self.max_size)
   self:write(payload)
   if self.max_size and self.curr_size >= self.max_size then
     return self:do_reasoned_close()
@@ -290,6 +272,23 @@ return function(options)
   if options == nil then
     options = { }
   end
+  setmetatable(options, {
+    __index = {
+      prefix = '/ws',
+      sockjs_url = 'http://sockjs.github.com/sockjs-client/sockjs-latest.min.js',
+      heartbeat_delay = 25000,
+      disconnect_delay = 5000,
+      response_limit = 128 * 1024,
+      origins = {
+        '*:*'
+      },
+      disabled_transports = { },
+      cache_age = 365 * 24 * 60 * 60,
+      get_nonce = function()
+        return Math.random()
+      end
+    }
+  })
   local routes = {
     ['POST ${prefix}/[^./]+/([^./]+)/xhr_send[/]?$' % options] = function(self, nxt, sid)
       handle_xhr_cors(self)
@@ -301,27 +300,20 @@ return function(options)
           return 
         end
         self.processed = true
-        p('BODY', data)
-        if data == '' then
-          p('-------------------------------------------------------------------------')
-        end
         local session = Session.get(sid)
         if not session then
           return self:send(404)
         end
-        p('FOUND TARGET!', sid)
         local ctype = self.req.headers['content-type'] or ''
         ctype = String.match(ctype, '[^;]*')
         if not allowed_content_types.xhr[ctype] then
           data = nil
         end
-        p('BODYPREDEC', data, ctype, self.req.headers['content-type'])
         if not data then
           return self:fail('Payload expected.')
         end
         local status
         status, data = pcall(JSON.decode, data)
-        p('table', status, data)
         if not status then
           return self:fail('Broken JSON encoding.')
         end
@@ -339,7 +331,7 @@ return function(options)
         return 
       end
       self.req:on('error', function(err)
-        p('error', err)
+        error(err(err))
         return 
       end)
       self.req:on('end', process)
@@ -401,7 +393,7 @@ return function(options)
         return 
       end
       self.req:on('error', function(err)
-        p('error', err)
+        error(err)
         return 
       end)
       self.req:on('end', process)
@@ -588,43 +580,33 @@ return function(options)
     ['POST /close[/]?'] = function(self, nxt)
       self:send(200, 'c[3000,"Go away!"]\n')
       return 
+    end,
+    ['(%w+) ${prefix}/[^./]+/([^./]+)/websocket[/]?$' % options] = function(self, nxt, verb, sid)
+      if true then
+        return self:send(404)
+      end
+      if verb ~= 'GET' then
+        return self:send(405)
+      end
+      if String.lower(self.req.headers.upgrade or '') ~= 'websocket' then
+        return self:send(400, 'Can "Upgrade" only to "WebSocket".')
+      end
+      if String.lower(self.req.headers.connection or '') ~= 'upgrade' then
+        return self:send(400, '"Connection" must be "Upgrade".')
+      end
+      local origin = self.req.headers.origin
+      local location = ((function()
+        if origin and origin[1 .. 5] == 'https' then
+          return 'wss'
+        else
+          return 'ws'
+        end
+      end)())
+      location = location .. '://' .. self.req.headers.host .. self.req.url
+      local ver = self.req.headers['sec-websocket-version']
+      local shaker = require('lib/stack/sockjs-websocket').WebHandshakeHixie76
+      return shaker(options, self.req, self, (head or ''), origin, location)
     end
   }
-  if false then
-    Table.insert(routes, {
-      ['(%w+) ${prefix}/[^./]+/([^./]+)/websocket[/]?$' % options] = function(self, nxt, verb, sid)
-        p('WEBSOCKET', self.req)
-        if verb ~= 'GET' then
-          return self:send(405)
-        end
-        if String.lower(self.req.headers.upgrade or '') ~= 'websocket' then
-          return self:send(400, 'Can "Upgrade" only to "WebSocket".')
-        end
-        if String.lower(self.req.headers.connection or '') ~= 'upgrade' then
-          return self:send(400, '"Connection" must be "Upgrade".')
-        end
-        local origin = self.req.headers.origin
-        local location = ((function()
-          if origin and origin[1 .. 5] == 'https' then
-            return 'wss'
-          else
-            return 'ws'
-          end
-        end)())
-        location = location .. '://' .. self.req.headers.host .. self.req.url
-        local ver = self.req.headers['sec-websocket-version']
-        local shaker
-        if ver == '8' or ver == '7' then
-          shaker = WebHandshake8
-        else
-          shaker = WebHandshakeHixie76
-        end
-        return shaker(options, self.req, self, (head or ''), origin, location)
-      end
-    })
-  end
-  for k, v in pairs(routes) do
-    p(k)
-  end
-  return Stack.use('route')(routes)
+  return routes
 end

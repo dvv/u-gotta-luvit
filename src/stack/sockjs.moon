@@ -1,15 +1,19 @@
-require 'lib/util'
-Stack = require 'lib/stack'
-EventEmitter = setmetatable({}, {__index: require('emitter').meta})
+--
+-- SockJS server implemented in luvit
+-- https://github.com/sockjs/sockjs-protocol for details
+--
+
+EventEmitter = setmetatable {}, __index: require('emitter').meta
 import set_timeout, clear_timer from require 'timer'
 JSON = require 'cjson'
 import date, time from require 'os'
+Math = require 'math'
 
-_error = error
-error = (...) -> p('BADBADBAD ERROR', ...)
+-- sockjs-protocol tests
+-- BaseUrlGreeting IframePage Protocol SessionURLs ChunkingTest XhrPolling JsonPolling EventSource HtmlFile XhrStreaming
 
 --
--- ???
+-- helper iframe content, to allow cross-domain connections
 --
 iframe_template = [[
 <!DOCTYPE html>
@@ -30,9 +34,9 @@ iframe_template = [[
 </html>
 ]]
 
--- Browsers fail with "Uncaught exception: ReferenceError: Security
--- error: attempted to read protected variable: _jp". Set
--- document.domain in order to work around that.
+--
+-- cross-domain htmlfile transport template
+--
 htmlfile_template = [[
 <!doctype html>
 <html><head>
@@ -80,7 +84,7 @@ allowed_content_types = {
 }
 
 --
--- escape given string for passing via EventSource transport
+-- escape given string for passing safely via EventSource transport
 --
 escape_for_eventsource = (str) ->
   str = String.gsub str, '%%', '%25'
@@ -110,14 +114,12 @@ class Session extends EventEmitter
     @send_buffer = {}
     @readyState = Transport.CONNECTING
     sessions[@sid] = self if @sid
-    @timeout_cb = -> @didTimeout()
-    @to_tref = set_timeout @disconnect_delay, @timeout_cb
+    @to_tref = set_timeout @disconnect_delay, @ontimeout
     @emit_connection_event = ->
       @emit_connection_event = nil
       options.onconnection self
 
   register: (recv) =>
-    p('REGISTER', @sid)
     if @recv
       recv\send_frame Transport.closing_frame(2010, 'Another connection still open')
       return
@@ -126,7 +128,7 @@ class Session extends EventEmitter
       @to_tref = nil
     if @readyState == Transport.CLOSING
       recv\send_frame @close_frame
-      @to_tref = set_timeout @disconnect_delay, @timeout_cb
+      @to_tref = set_timeout @disconnect_delay, @ontimeout
       return
     --
     @recv = recv
@@ -141,20 +143,17 @@ class Session extends EventEmitter
     return
 
   unregister: =>
-    p('UNREGISTER', @sid)
     @recv.session = nil
     @recv = nil
     if @to_tref
       clear_timer @to_tref
-    @to_tref = set_timeout @disconnect_delay, @timeout_cb
+    @to_tref = set_timeout @disconnect_delay, @ontimeout
     return
 
   flush: =>
-    p('TRYFLUSH', @sid, @send_buffer)
     if #@send_buffer > 0
       messages = @send_buffer
       @send_buffer = {}
-      p('SENDBULK', messages)
       @recv\send_frame 'a' .. JSON.encode(messages)
     else
       if @to_tref
@@ -166,7 +165,7 @@ class Session extends EventEmitter
       @to_tref = set_timeout @heartbeat_delay, x
     return
 
-  didTimeout: =>
+  ontimeout: =>
     if @readyState != Transport.CONNECTING and @readyState != Transport.OPEN and @readyState != Transport.CLOSING
       error 'INVALID_STATE_ERR'
     if @recv
@@ -179,20 +178,17 @@ class Session extends EventEmitter
     return
 
   onmessage: (payload) =>
-    p('INCOME', @sid, payload)
     if @readyState == Transport.OPEN
       @emit 'message', payload
     return
 
   send: (payload) =>
     return false if @readyState != Transport.OPEN
-    p('SEND', @sid, payload)
     Table.insert @send_buffer, tostring(payload)
     @flush() if @recv
     true
 
   close: (status = 1000, reason = 'Normal closure') =>
-    p('CLOSE', @sid, status)
     return false if @readyState != Transport.OPEN
     @readyState = Transport.CLOSING
     @close_frame = Transport.closing_frame status, reason
@@ -237,13 +233,11 @@ handle_balancer_cookie = () =>
 
 Response = require 'response'
 Response.prototype.do_reasoned_close = (status, reason) =>
-  p('DOCLOSE', status, reason)
   @close()
   if @session
     @session\unregister status, reason
 Response.prototype.write_frame = (payload) =>
   @curr_size = @curr_size + #payload
-  p('DOSENDFRAME', payload, @curr_size, @max_size)
   @write payload
   if @max_size and @curr_size >= @max_size
     @do_reasoned_close()
@@ -251,6 +245,17 @@ Response.prototype.write_frame = (payload) =>
 return (options = {}) ->
 
   -- defaults
+  setmetatable options, __index: {
+    prefix: '/ws'
+    sockjs_url: 'http://sockjs.github.com/sockjs-client/sockjs-latest.min.js'
+    heartbeat_delay: 25000
+    disconnect_delay: 5000
+    response_limit: 128 * 1024
+    origins: {'*:*'}
+    disabled_transports: {}
+    cache_age: 365 * 24 * 60 * 60 -- one year
+    get_nonce: () -> Math.random()
+  }
 
   -- routes to respond to
   routes = {
@@ -266,27 +271,20 @@ return (options = {}) ->
         -- doesn't report 'end' for null bodied requests
         return if @processed
         @processed = true
-        p('BODY', data)
-        if data == ''
-          p('-------------------------------------------------------------------------')
         -- bail out unless such session exists
         -- FIXME: why it can't be done before end of request?
         session = Session.get sid
         return @send 404 if not session
-        p('FOUND TARGET!', sid)
         ctype = @req.headers['content-type'] or ''
         ctype = String.match ctype, '[^;]*'
         data = nil if not allowed_content_types.xhr[ctype]
-        p('BODYPREDEC', data, ctype, @req.headers['content-type'])
         return @fail 'Payload expected.' if not data
         status, data = pcall JSON.decode, data
-        p('table', status, data)
         return @fail 'Broken JSON encoding.' if not status
         -- we expect array of messages
         return @fail 'Payload expected.' if not is_array data
         -- process message
         for message in *data
-          --p('message', message)
           session\onmessage message
         -- respond ok
         @send 204, nil, {
@@ -294,11 +292,10 @@ return (options = {}) ->
         }
         return
       @req\on 'error', (err) ->
-        p('error', err)
+        error err err
         return
       @req\on 'end', process
       @req\on 'data', (chunk) ->
-        --p('chunk', chunk)
         data = if data then data .. chunk else chunk
         process()
         return
@@ -314,12 +311,10 @@ return (options = {}) ->
         -- doesn't report 'end' for null bodied requests
         return if @processed
         @processed = true
-        --p('BODY', data)
         -- bail out unless such session exists
         -- FIXME: why it can't be done before end of request?
         session = Session.get sid
         return @send 404 if not session
-        --p('FOUND TARGET!', sid)
         ctype = @req.headers['content-type'] or ''
         ctype = String.match ctype, '[^;]*'
         decoder = allowed_content_types.jsonp[ctype]
@@ -327,11 +322,9 @@ return (options = {}) ->
         -- FIXME: data can be uri.query.d
         if data and decoder != true
           data = decoder(data).d
-        --p('BODYDEC', data, ctype)
         data = nil if data == ''
         return @fail 'Payload expected.' if not data
         status, data = pcall JSON.decode, data
-        --p('table', status, data)
         return @fail 'Broken JSON encoding.' if not status
         -- we expect array of messages
         return @fail 'Payload expected.' if not is_array data
@@ -344,11 +337,10 @@ return (options = {}) ->
         }
         return
       @req\on 'error', (err) ->
-        p('error', err)
+        error err
         return
       @req\on 'end', process
       @req\on 'data', (chunk) ->
-        --p('chunk', chunk)
         data = if data then data .. chunk else chunk
         process()
         return
@@ -532,32 +524,27 @@ return (options = {}) ->
       @send 200, 'c[3000,"Go away!"]\n'
       return
 
+  -- websockets
+
+  ['(%w+) ${prefix}/[^./]+/([^./]+)/websocket[/]?$' % options]: (nxt, verb, sid) =>
+    -- TODO: inhibit so far
+    return @send 404 if true
+    if verb != 'GET'
+      return @send 405
+    if String.lower(@req.headers.upgrade or '') != 'websocket'
+      return @send 400, 'Can "Upgrade" only to "WebSocket".'
+    if String.lower(@req.headers.connection or '') != 'upgrade'
+      return @send 400, '"Connection" must be "Upgrade".'
+    origin = @req.headers.origin
+    --TODOif not verify_origin(origin, @options.origins)
+    --TODO  return @send 400, 'Unverified origin.'
+    location = (if origin and origin[1..5] == 'https' then 'wss' else 'ws')
+    location = location .. '://' .. @req.headers.host .. @req.url
+    ver = @req.headers['sec-websocket-version']
+    --shaker = if ver == '8' or ver == '7' then WebHandshake8 else WebHandshakeHixie76
+    shaker = require('lib/stack/sockjs-websocket').WebHandshakeHixie76
+    shaker options, @req, self, (head or ''), origin, location
+
   }
 
-  -- optional websockets
-
-  if false
-    Table.insert routes, {
-    ['(%w+) ${prefix}/[^./]+/([^./]+)/websocket[/]?$' % options]: (nxt, verb, sid) =>
-      p('WEBSOCKET', @req)
-      if verb != 'GET'
-        return @send 405
-      if String.lower(@req.headers.upgrade or '') != 'websocket'
-        return @send 400, 'Can "Upgrade" only to "WebSocket".'
-      if String.lower(@req.headers.connection or '') != 'upgrade'
-        return @send 400, '"Connection" must be "Upgrade".'
-      origin = @req.headers.origin
-      --TODOif not verify_origin(origin, @options.origins)
-      --TODO  return @send 400, 'Unverified origin.'
-      location = (if origin and origin[1..5] == 'https' then 'wss' else 'ws')
-      location = location .. '://' .. @req.headers.host .. @req.url
-      ver = @req.headers['sec-websocket-version']
-      shaker = if ver == '8' or ver == '7' then WebHandshake8 else WebHandshakeHixie76
-      shaker options, @req, self, (head or ''), origin, location
-    }
-
-  for k, v in pairs(routes)
-    p(k)
-
-  -- handler
-  return Stack.use('route') routes
+  routes

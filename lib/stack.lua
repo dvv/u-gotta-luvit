@@ -22,6 +22,7 @@ Stack = (function()
         host = '0.0.0.0'
       end
       local server = require('http').create_server(host, port, self.handler)
+      server:on('upgrade', self.handler)
       return server
     end
   }
@@ -40,16 +41,12 @@ Stack = (function()
           local fn
           fn = function(err)
             if err then
-              assert('JUSTERR' ~= 'JUSTERR')
               return error_handler(req, res, err)
             else
               return child(req, res)
             end
           end
           local status, err = pcall(layer, req, res, fn)
-          if err then
-            p('EXCEPT', err, req.url)
-          end
           if err then
             return error_handler(req, res, err)
           end

@@ -24,13 +24,10 @@ class Stack
       handler = (req, res) ->
         fn = (err) ->
           if err
-            assert 'JUSTERR' != 'JUSTERR'
             error_handler req, res, err
           else
             child req, res
         status, err = pcall(layer, req, res, fn)
-        if err
-          p('EXCEPT', err, req.url)
         error_handler req, res, err if err
     @handler = handler
 
@@ -51,7 +48,7 @@ class Stack
   run: (port = 80, host = '0.0.0.0') =>
     server = require('http').create_server(host, port, @handler)
     -- handle Upgrade:
-    --server\on 'upgrade', @handler
+    server\on 'upgrade', @handler
     server
 
 -----------------------------------------------------------
@@ -99,7 +96,6 @@ Response.prototype.set_header = (name, value) =>
 
 -- serve 500 error and reason
 Response.prototype.fail = (reason) =>
-  --p('FAIL', self, reason)
   @send 500, reason, {
     ['Content-Type']: 'text/plain; charset=UTF-8'
     ['Content-Length']: #reason
