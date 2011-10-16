@@ -15,16 +15,20 @@ XhrPolling
 JsonPolling
 Protocol
 SessionURLs
-WebsocketHixie76
-WebsocketHttpErrors
-WebsocketHybi10
 EventSource
 HtmlFile
 XhrStreaming
+WebsocketHixie76
+WebsocketHttpErrors
+WebsocketHybi10
 ]==]
 
 
 layers = () -> {
+
+  (req, res, nxt) ->
+    res.req = req
+    nxt()
 
   -- /echo
   Stack.use('sockjs')({
@@ -52,7 +56,7 @@ layers = () -> {
   Stack.use('static')('/public/', 'public/', {
     -- should the `file` contents be cached?
     --is_cacheable: (file) file.size <= 65536
-    is_cacheable: (file) -> true
+    --is_cacheable: (file) -> true
   })
 
 }

@@ -12,16 +12,20 @@ XhrPolling
 JsonPolling
 Protocol
 SessionURLs
-WebsocketHixie76
-WebsocketHttpErrors
-WebsocketHybi10
 EventSource
 HtmlFile
 XhrStreaming
+WebsocketHixie76
+WebsocketHttpErrors
+WebsocketHybi10
 ]==]
 local layers
 layers = function()
   return {
+    function(req, res, nxt)
+      res.req = req
+      return nxt()
+    end,
     Stack.use('sockjs')({
       prefix = '/echo',
       sockjs_url = '/public/sockjs.js',
@@ -48,11 +52,7 @@ layers = function()
         return self:render('index.html', self.req.context)
       end
     }),
-    Stack.use('static')('/public/', 'public/', {
-      is_cacheable = function(file)
-        return true
-      end
-    })
+    Stack.use('static')('/public/', 'public/', { })
   }
 end
 local s1 = Stack(layers()):run(8080)

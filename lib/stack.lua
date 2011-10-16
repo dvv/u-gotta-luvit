@@ -22,7 +22,6 @@ Stack = (function()
         host = '0.0.0.0'
       end
       local server = require('http').create_server(host, port, self.handler)
-      server:on('upgrade', self.handler)
       return server
     end
   }
@@ -41,12 +40,16 @@ Stack = (function()
           local fn
           fn = function(err)
             if err then
+              assert('JUSTERR' ~= 'JUSTERR')
               return error_handler(req, res, err)
             else
               return child(req, res)
             end
           end
           local status, err = pcall(layer, req, res, fn)
+          if err then
+            p('EXCEPT', err, req.url)
+          end
           if err then
             return error_handler(req, res, err)
           end
@@ -94,7 +97,7 @@ Response.prototype.send = function(self, code, data, headers, close)
   for k, v in pairs(headers or { }) do
     h[k] = v
   end
-  p('RESPONSE', code, data, h)
+  p('RESPONSE', self.req and self.req.url, code, data, h)
   self:write_head(code, h or { })
   local _ = [==[  if data
     @safe_write data, () -> @close()

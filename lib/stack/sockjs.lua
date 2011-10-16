@@ -434,27 +434,6 @@ return function(options)
       session:register(self)
       return 
     end,
-    ['POST ${prefix}/[^./]+/([^./]+)/xhr_streaming[/]?$' % options] = function(self, nxt, sid)
-      handle_xhr_cors(self)
-      handle_balancer_cookie(self)
-      local content = String.rep('h', 2048) .. '\n'
-      self:send(200, content, {
-        ['Content-Type'] = 'application/javascript; charset=UTF-8'
-      }, false)
-      self:write('\000')
-      self.protocol = 'xhr-streaming'
-      self.curr_size, self.max_size = 0, options.response_limit
-      self.send_frame = function(self, payload)
-        self:write_frame(payload .. '\n')
-        return self:write('\000')
-      end
-      self:on('end', function()
-        return self:do_reasoned_close(1006, 'Connection closed')
-      end)
-      local session = Session.get_or_create(sid, options)
-      session:register(self)
-      return 
-    end,
     ['GET ${prefix}/[^./]+/([^./]+)/jsonp[/]?$' % options] = function(self, nxt, sid)
       handle_balancer_cookie(self)
       local callback = self.req.uri.query.c or self.req.uri.query.callback
@@ -477,6 +456,26 @@ return function(options)
       session:register(self)
       return 
     end,
+    ['POST ${prefix}/[^./]+/([^./]+)/xhr_streaming[/]?$' % options] = function(self, nxt, sid)
+      handle_xhr_cors(self)
+      handle_balancer_cookie(self)
+      local content = String.rep('h', 2048) .. '\n'
+      self:send(200, content, {
+        ['Content-Type'] = 'application/javascript; charset=UTF-8'
+      }, false)
+      self:nodelay(true)
+      self.protocol = 'xhr-streaming'
+      self.curr_size, self.max_size = 0, options.response_limit
+      self.send_frame = function(self, payload)
+        return self:write_frame(payload .. '\n')
+      end
+      self:on('end', function()
+        return self:do_reasoned_close(1006, 'Connection closed')
+      end)
+      local session = Session.get_or_create(sid, options)
+      session:register(self)
+      return 
+    end,
     ['GET ${prefix}/[^./]+/([^./]+)/htmlfile[/]?$' % options] = function(self, nxt, sid)
       handle_balancer_cookie(self)
       local callback = self.req.uri.query.c or self.req.uri.query.callback
@@ -488,12 +487,11 @@ return function(options)
         ['Content-Type'] = 'text/html; charset=UTF-8',
         ['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
       }, false)
-      self:write('\000')
+      self:nodelay(true)
       self.protocol = 'htmlfile'
       self.curr_size, self.max_size = 0, options.response_limit
       self.send_frame = function(self, payload)
-        self:write_frame('<script>\np(' .. JSON.encode(payload) .. ');\n</script>\r\n')
-        return self:write('\000')
+        return self:write_frame('<script>\np(' .. JSON.encode(payload) .. ');\n</script>\r\n')
       end
       self:on('end', function()
         return self:do_reasoned_close(1006, 'Connection closed')
@@ -508,12 +506,11 @@ return function(options)
         ['Content-Type'] = 'text/event-stream; charset=UTF-8',
         ['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
       }, false)
-      self:write('\000')
+      self:nodelay(true)
       self.protocol = 'eventsource'
       self.curr_size, self.max_size = 0, options.response_limit
       self.send_frame = function(self, payload)
-        self:write_frame('data: ' .. escape_for_eventsource(payload) .. '\r\n\r\n')
-        return self:write('\000')
+        return self:write_frame('data: ' .. escape_for_eventsource(payload) .. '\r\n\r\n')
       end
       self:on('end', function()
         return self:do_reasoned_close(1006, 'Connection closed')
@@ -527,30 +524,18 @@ return function(options)
       self:send(200, nil, {
         ['Content-Type'] = 'application/javascript; charset=UTF-8'
       }, false)
-      self.req:on('error', function(err)
-        p('error', err)
-        return 
-      end)
-      self.req:on('end', function()
-        self:write((String.rep(' ', 2048)) .. 'h\n')
-        self:write('\000')
-        for k, delay in ipairs({
-          5,
-          25 + 5,
-          125 + 25 + 5,
-          625 + 125 + 25 + 5,
-          3125 + 625 + 125 + 25 + 5
-        }) do
-          set_timeout(delay, function()
-            self:write('h\n')
-            self:write('\000')
-            if k == 5 then
-              return self:close()
-            end
-          end)
-        end
-        return 
-      end)
+      self:write((String.rep(' ', 2048)) .. 'h\n')
+      for k, delay in ipairs({
+        5,
+        25 + 5,
+        125 + 25 + 5,
+        625 + 125 + 25 + 5,
+        3125 + 625 + 125 + 25 + 5
+      }) do
+        set_timeout(delay, function()
+          return pcall(write, self, 'h\n')
+        end)
+      end
       return 
     end,
     ['OPTIONS ${prefix}/chunking_test[/]?$' % options] = function(self, nxt)

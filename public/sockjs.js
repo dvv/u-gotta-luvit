@@ -1,4 +1,4 @@
-// SockJS client, version 0.0.4.23.g33ec, MIT License
+// SockJS client, version 0.0.4.33.g9394, MIT License
 //     https://github.com/sockjs/sockjs-client
 
 // JSON2 by Douglas Crockford (minified).
@@ -306,7 +306,11 @@ utils.createIframe = function (iframe_url, error_callback) {
     var cleanup = function() {
         if (iframe) {
             unattach();
-            iframe.parentNode.removeChild(iframe);
+            try {
+              iframe.parentNode.removeChild(iframe);
+            } catch(err) {
+              _document.removeChild(iframe);
+            }
             iframe.src = "about:blank";
             iframe = null;
             utils.detachEvent('unload', cleanup);
@@ -328,8 +332,10 @@ utils.createIframe = function (iframe_url, error_callback) {
         clearTimeout(tref);
         tref = setTimeout(function(){onerror('onload timeout');}, 2000);
     };
-    _document.body.appendChild(iframe);
-    //_document.appendChild(iframe);
+    try{
+    window.D = _document;
+    Object(_document.body).appendChild(iframe);
+    }catch(err){console.error(err)}
     tref = setTimeout(function(){onerror('timeout');}, 5000);
     utils.attachEvent('unload', cleanup);
     return {
@@ -385,12 +391,12 @@ utils.createHtmlfile = function (iframe_url, error_callback) {
     };
 };
 
-utils.closeFrame = function (status, reason) {
-    return 'c'+JSON.stringify([status, reason]);
+utils.closeFrame = function (code, reason) {
+    return 'c'+JSON.stringify([code, reason]);
 };
 
-utils.userSetStatus = function (status) {
-    return status === 1000 || (status >= 3000 && status <= 4999);
+utils.userSetCode = function (code) {
+    return code === 1000 || (code >= 3000 && code <= 4999);
 };
 
 utils.log = function() {
@@ -411,8 +417,9 @@ utils.bind = function(fun, that) {
 
 utils.amendUrl = function(url) {
     var dl = _document.location;
-    // falsy url means use current document location as url
-    if (!url) url = dl;
+    if (!url) {
+        throw new Error('Wrong url for SockJS');
+    }
     //  '//abc' --> 'http://abc'
     if (url.indexOf('//') === 0) {
         url = dl.protocol + url;
@@ -421,7 +428,8 @@ utils.amendUrl = function(url) {
     if (url.indexOf('/') === 0) {
         url = dl.protocol + '//' + dl.host + url;
     }
-    url = url.replace(/[/]+$/,''); // strip trailing slashes
+    // strip trailing slashes
+    url = url.replace(/[/]+$/,'');
     return url;
 };
 
@@ -475,7 +483,7 @@ var SockJS = function(url, protocols, options) {
 // Inheritance
 SockJS.prototype = new REventTarget();
 
-SockJS.version = "0.0.4.23.g33ec";
+SockJS.version = "0.0.4.33.g9394";
 
 SockJS.CONNECTING = 0;
 SockJS.OPEN = 1;
@@ -511,7 +519,7 @@ SockJS.prototype._dispatchMessage = function(data) {
 };
 
 
-SockJS.prototype._didClose = function(status, reason) {
+SockJS.prototype._didClose = function(code, reason) {
     var that = this;
     if (that.readyState !== SockJS.CONNECTING &&
         that.readyState !== SockJS.OPEN &&
@@ -524,9 +532,11 @@ SockJS.prototype._didClose = function(status, reason) {
         clearTimeout(that._transport_tref);
         that._transport_tref = null;
     }
-    var close_event = new SimpleEvent("close", {status: status, reason: reason});
+    var close_event = new SimpleEvent("close", {code: code,
+                                                reason: reason,
+                                                wasClean: utils.userSetCode(code)});
 
-    if (!utils.userSetStatus(status) && that.readyState === SockJS.CONNECTING) {
+    if (!utils.userSetCode(code) && that.readyState === SockJS.CONNECTING) {
         if (that._try_next_protocol(close_event)) {
             that._transport_tref = setTimeout(
                 function() {
@@ -540,8 +550,9 @@ SockJS.prototype._didClose = function(status, reason) {
                 }, 5001);
             return;
         }
-        close_event = new SimpleEvent("close", {status: 2000,
+        close_event = new SimpleEvent("close", {code: 2000,
                                                 reason: "All transports failed",
+                                                wasClean: false,
                                                 last_event: close_event});
     }
     that.readyState = SockJS.CLOSED;
@@ -619,16 +630,16 @@ SockJS.prototype._try_next_protocol = function(close_event) {
     }
 };
 
-SockJS.prototype.close = function(status, reason) {
+SockJS.prototype.close = function(code, reason) {
     var that = this;
-    if (status && !utils.userSetStatus(status))
+    if (code && !utils.userSetCode(code))
         throw new Error("INVALID_ACCESS_ERR");
     if(that.readyState !== SockJS.CONNECTING &&
        that.readyState !== SockJS.OPEN) {
         return false;
     }
     that.readyState = SockJS.CLOSING;
-    that._didClose(status || 1000, reason || "Normal closure");
+    that._didClose(code || 1000, reason || "Normal closure");
     return true;
 };
 
@@ -637,7 +648,7 @@ SockJS.prototype.send = function(data) {
     if (that.readyState === SockJS.CONNECTING)
         throw new Error('INVALID_STATE_ERR');
     if (that.readyState === SockJS.OPEN) {
-        that._transport.doSend(JSON.stringify(data));
+        that._transport.doSend(JSON.stringify('' + data));
     }
     return true;
 };
@@ -1152,8 +1163,8 @@ var postMessage = function (type, data) {
 };
 
 var FacadeJS = function() {};
-FacadeJS.prototype._didClose = function (status, reason) {
-    postMessage('t', utils.closeFrame(status, reason));
+FacadeJS.prototype._didClose = function (code, reason) {
+    postMessage('t', utils.closeFrame(code, reason));
 };
 FacadeJS.prototype._didMessage = function (frame) {
     postMessage('t', frame);
@@ -1283,7 +1294,6 @@ var chunkingTest = function() {
     var value;
     var t0 = 0;
     return function (base_url, callback) {
-return callback(true);
         var t1 = (new Date()).getTime();
         if (t1 - t0 > 10000) {
             chunkingTestUncached(base_url, function (v) {

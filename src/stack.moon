@@ -24,10 +24,13 @@ class Stack
       handler = (req, res) ->
         fn = (err) ->
           if err
+            assert 'JUSTERR' != 'JUSTERR'
             error_handler req, res, err
           else
             child req, res
         status, err = pcall(layer, req, res, fn)
+        if err
+          p('EXCEPT', err, req.url)
         error_handler req, res, err if err
     @handler = handler
 
@@ -48,7 +51,7 @@ class Stack
   run: (port = 80, host = '0.0.0.0') =>
     server = require('http').create_server(host, port, @handler)
     -- handle Upgrade:
-    server\on 'upgrade', @handler
+    --server\on 'upgrade', @handler
     server
 
 -----------------------------------------------------------
@@ -77,7 +80,7 @@ Response.prototype.send = (code, data, headers, close = true) =>
   h = @headers or {}
   for k, v in pairs(headers or {})
     h[k] = v
-  p('RESPONSE', code, data, h)
+  p('RESPONSE', @req and @req.url, code, data, h)
   @write_head code, h or {}
   [==[
   if data
@@ -85,8 +88,7 @@ Response.prototype.send = (code, data, headers, close = true) =>
   else
     @close()
   ]==]
-  if data
-    @write data
+  @write data if data
   @close() if close
 
 -- defines response header

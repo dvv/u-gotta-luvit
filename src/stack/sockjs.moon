@@ -373,30 +373,6 @@ return (options = {}) ->
       session\register self
       return
 
-    -- xhr_streaming
-
-    ['POST ${prefix}/[^./]+/([^./]+)/xhr_streaming[/]?$' % options]: (nxt, sid) =>
-      handle_xhr_cors self
-      handle_balancer_cookie self
-      -- IE requires 2KB prefix:
-      -- http://blogs.msdn.com/b/ieinternals/archive/2010/04/06/comet-streaming-in-internet-explorer-with-xmlhttprequest-and-xdomainrequest.aspx
-      content = String.rep('h', 2048) .. '\n'
-      @send 200, content, {
-        ['Content-Type']: 'application/javascript; charset=UTF-8'
-      }, false
-      @write('\000')
-      -- upgrade response to session handler
-      @protocol = 'xhr-streaming'
-      @curr_size, @max_size = 0, options.response_limit
-      @send_frame = (payload) =>
-        @write_frame(payload .. '\n')
-        @write('\000')
-      @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
-      -- register session
-      session = Session.get_or_create sid, options
-      session\register self
-      return
-
     -- jsonp (polling)
 
     ['GET ${prefix}/[^./]+/([^./]+)/jsonp[/]?$' % options]: (nxt, sid) =>
@@ -418,6 +394,29 @@ return (options = {}) ->
       session\register self
       return
 
+    -- xhr_streaming
+
+    ['POST ${prefix}/[^./]+/([^./]+)/xhr_streaming[/]?$' % options]: (nxt, sid) =>
+      handle_xhr_cors self
+      handle_balancer_cookie self
+      -- IE requires 2KB prefix:
+      -- http://blogs.msdn.com/b/ieinternals/archive/2010/04/06/comet-streaming-in-internet-explorer-with-xmlhttprequest-and-xdomainrequest.aspx
+      content = String.rep('h', 2048) .. '\n'
+      @send 200, content, {
+        ['Content-Type']: 'application/javascript; charset=UTF-8'
+      }, false
+      -- upgrade response to session handler
+      @nodelay true
+      @protocol = 'xhr-streaming'
+      @curr_size, @max_size = 0, options.response_limit
+      @send_frame = (payload) =>
+        @write_frame(payload .. '\n')
+      @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
+      -- register session
+      session = Session.get_or_create sid, options
+      session\register self
+      return
+
     -- htmlfile
 
     ['GET ${prefix}/[^./]+/([^./]+)/htmlfile[/]?$' % options]: (nxt, sid) =>
@@ -429,13 +428,12 @@ return (options = {}) ->
         ['Content-Type']: 'text/html; charset=UTF-8'
         ['Cache-Control']: 'no-store, no-cache, must-revalidate, max-age=0'
       }, false
-      @write('\000')
       -- upgrade response to session handler
+      @nodelay true
       @protocol = 'htmlfile'
       @curr_size, @max_size = 0, options.response_limit
       @send_frame = (payload) =>
         @write_frame('<script>\np(' .. JSON.encode(payload) .. ');\n</script>\r\n')
-        @write('\000')
       @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
       -- register session
       session = Session.get_or_create sid, options
@@ -451,13 +449,12 @@ return (options = {}) ->
         ['Content-Type']: 'text/event-stream; charset=UTF-8'
         ['Cache-Control']: 'no-store, no-cache, must-revalidate, max-age=0'
       }, false
-      @write('\000')
       -- upgrade response to session handler
+      @nodelay true
       @protocol = 'eventsource'
       @curr_size, @max_size = 0, options.response_limit
       @send_frame = (payload) =>
         @write_frame('data: ' .. escape_for_eventsource(payload) .. '\r\n\r\n')
-        @write('\000')
       @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
       -- register session
       session = Session.get_or_create sid, options
@@ -471,19 +468,11 @@ return (options = {}) ->
       @send 200, nil, {
         ['Content-Type']: 'application/javascript; charset=UTF-8' -- for FF
       }, false
-      @req\on 'error', (err) ->
-        p('error', err)
-        return
-      @req\on 'end', () ->
-        @write (String.rep ' ', 2048) .. 'h\n'
-        @write '\000'
-        for k, delay in ipairs {5, 25+5, 125+25+5, 625+125+25+5, 3125+625+125+25+5}
-          set_timeout delay, () ->
-            @write 'h\n'
-            @write '\000'
-            if k == 5
-              @close()
-        return
+      @write (String.rep ' ', 2048) .. 'h\n'
+      for k, delay in ipairs {5, 25+5, 125+25+5, 625+125+25+5, 3125+625+125+25+5}
+        set_timeout delay, () ->
+          pcall write, self, 'h\n'
+      --set_timeout 4000, () -> @close()
       return
 
     ['OPTIONS ${prefix}/chunking_test[/]?$' % options]: (nxt) =>
