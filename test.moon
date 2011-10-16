@@ -1,3 +1,4 @@
+[==[
 --EventEmitter = setmetatable({}, {__index: require('emitter').meta})
 
 obj = {
@@ -13,3 +14,8 @@ class Foo
 foo = Foo obj
 foo\foo!
 foo\bar 1
+]==]
+
+foo = () ->
+  a = 123
+  return

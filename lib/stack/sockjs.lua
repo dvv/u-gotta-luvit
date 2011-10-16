@@ -105,7 +105,7 @@ Session = (function()
       end
       if self.readyState == Transport.CLOSING then
         recv:send_frame(self.close_frame)
-        self.to_tref = set_timeout(self.disconnect_delay, self.ontimeout)
+        self.to_tref = set_timeout(self.disconnect_delay, self.timeout_cb)
         return 
       end
       self.recv = recv
@@ -124,7 +124,7 @@ Session = (function()
       if self.to_tref then
         clear_timer(self.to_tref)
       end
-      self.to_tref = set_timeout(self.disconnect_delay, self.ontimeout)
+      self.to_tref = set_timeout(self.disconnect_delay, self.timeout_cb)
       return 
     end,
     flush = function(self)
@@ -212,7 +212,10 @@ Session = (function()
       if self.sid then
         sessions[self.sid] = self
       end
-      self.to_tref = set_timeout(self.disconnect_delay, self.ontimeout)
+      self.timeout_cb = function()
+        return self:ontimeout()
+      end
+      self.to_tref = set_timeout(self.disconnect_delay, self.timeout_cb)
       self.emit_connection_event = function()
         self.emit_connection_event = nil
         return options.onconnection(self)

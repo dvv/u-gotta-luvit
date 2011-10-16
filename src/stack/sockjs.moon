@@ -114,7 +114,8 @@ class Session extends EventEmitter
     @send_buffer = {}
     @readyState = Transport.CONNECTING
     sessions[@sid] = self if @sid
-    @to_tref = set_timeout @disconnect_delay, @ontimeout
+    @timeout_cb = () -> @ontimeout()
+    @to_tref = set_timeout @disconnect_delay, @timeout_cb
     @emit_connection_event = ->
       @emit_connection_event = nil
       options.onconnection self
@@ -128,7 +129,7 @@ class Session extends EventEmitter
       @to_tref = nil
     if @readyState == Transport.CLOSING
       recv\send_frame @close_frame
-      @to_tref = set_timeout @disconnect_delay, @ontimeout
+      @to_tref = set_timeout @disconnect_delay, @timeout_cb
       return
     --
     @recv = recv
@@ -147,7 +148,7 @@ class Session extends EventEmitter
     @recv = nil
     if @to_tref
       clear_timer @to_tref
-    @to_tref = set_timeout @disconnect_delay, @ontimeout
+    @to_tref = set_timeout @disconnect_delay, @timeout_cb
     return
 
   flush: =>
@@ -397,12 +398,16 @@ return (options = {}) ->
       @send 200, content, {
         ['Content-Type']: 'application/javascript; charset=UTF-8'
       }, false
+      -- N.B. these null-byte writes should be uncommented during automatic
+      -- test by means of sockjs-protocol *.py script
+      --@write '\000'
       -- upgrade response to session handler
       @nodelay true
       @protocol = 'xhr-streaming'
       @curr_size, @max_size = 0, options.response_limit
       @send_frame = (payload) =>
         @write_frame(payload .. '\n')
+        --@write '\000'
       @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
       -- register session
       session = Session.get_or_create sid, options

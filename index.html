@@ -25,7 +25,8 @@ $(function(){
         }
       }
     }
-(function(){
+//(function(){
+setTimeout(function(){
     var conn = new SockJS('/echo');//, [], {debug: true});
     //var conn = new SockJS('/echo', 'xhr-polling', {debug: true});
     //var conn = new SockJS('/echo', 'xhr-streaming', {debug: true});
@@ -42,7 +43,8 @@ $(function(){
       log(' [*] Message', this, arguments);
     };
     window.conn = conn;
-})();
+}, 1000);
+//})();
    </script>
 </head>
 <body>

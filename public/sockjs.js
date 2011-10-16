@@ -306,11 +306,7 @@ utils.createIframe = function (iframe_url, error_callback) {
     var cleanup = function() {
         if (iframe) {
             unattach();
-            try {
-              iframe.parentNode.removeChild(iframe);
-            } catch(err) {
-              _document.removeChild(iframe);
-            }
+            iframe.parentNode.removeChild(iframe);
             iframe.src = "about:blank";
             iframe = null;
             utils.detachEvent('unload', cleanup);
@@ -332,10 +328,7 @@ utils.createIframe = function (iframe_url, error_callback) {
         clearTimeout(tref);
         tref = setTimeout(function(){onerror('onload timeout');}, 2000);
     };
-    try{
-    window.D = _document;
-    Object(_document.body).appendChild(iframe);
-    }catch(err){console.error(err)}
+    _document.body.appendChild(iframe);
     tref = setTimeout(function(){onerror('timeout');}, 5000);
     utils.attachEvent('unload', cleanup);
     return {
