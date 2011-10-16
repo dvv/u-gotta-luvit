@@ -1,11 +1,12 @@
 require 'lib/util'
 Stack = require 'lib/stack'
+EventEmitter = setmetatable({}, {__index: require('emitter').meta})
 import set_timeout, clear_timer from require 'timer'
 JSON = require 'cjson'
 import date, time from require 'os'
 
 _error = error
-error = (...) -> p('FOCKING ERROR', ...)
+error = (...) -> p('BADBADBAD ERROR', ...)
 
 --
 -- ???
@@ -50,7 +51,22 @@ htmlfile_template = [[
 -- http://code.google.com/p/browsersec/wiki/Part2#Survey_of_content_sniffing_behaviors
 htmlfile_template = htmlfile_template .. String.rep(' ', 1024 - #htmlfile_template + 14) .. '\r\n\r\n'
 
-allowed_types = {
+--
+-- Transport abstraction
+--
+Transport = {
+  CONNECTING: 0
+  OPEN: 1
+  CLOSING: 2
+  CLOSED: 3
+  closing_frame: (status, reason) ->
+    'c' .. JSON.encode({status, reason})
+}
+
+--
+-- given Content-Type:, provide content decoder
+--
+allowed_content_types = {
   xhr:
     ['application/json']: JSON.decode
     ['text/plain']: JSON.decode
@@ -63,19 +79,22 @@ allowed_types = {
     ['']: true
 }
 
-closeFrame = (status, reason) -> 'c' .. JSON.encode({status, reason})
+--
+-- escape given string for passing via EventSource transport
+--
+escape_for_eventsource = (str) ->
+  str = String.gsub str, '%%', '%25'
+  str = String.gsub str, '\r', '%0D'
+  str = String.gsub str, '\n', '%0A'
+  str
 
-Transport = {
-  CONNECTING: 0
-  OPEN: 1
-  CLOSING: 2
-  CLOSED: 3
-}
+--
+-- Session -- bidirectional WebSocket-like channel between client and server
+--
 
--- private table of registered sessions
-sessions = {}
+sessions = {} -- private table of registered sessions
 
-class Session
+class Session extends EventEmitter
 
   get: (sid) -> sessions[sid]
 
@@ -93,41 +112,32 @@ class Session
     sessions[@sid] = self if @sid
     @timeout_cb = -> @didTimeout()
     @to_tref = set_timeout @disconnect_delay, @timeout_cb
-    @emit_open = ->
-      @emit_open = nil
-      --server.emit 'connection', self
+    @emit_connection_event = ->
+      @emit_connection_event = nil
       options.onconnection self
-      p('CONNECTION')
-
-  emit: (...) =>
-    p('EMIT', @sid, ...)
 
   register: (recv) =>
     p('REGISTER', @sid)
     if @recv
-      recv\doSendFrame closeFrame(2010, 'Another connection still open')
+      recv\send_frame Transport.closing_frame(2010, 'Another connection still open')
       return
+    if @to_tref
+      clear_timer @to_tref
+      @to_tref = nil
     if @readyState == Transport.CLOSING
-      recv\doSendFrame @close_frame
+      recv\send_frame @close_frame
       @to_tref = set_timeout @disconnect_delay, @timeout_cb
       return
-    -- registering. From now on 'unregister' is responsible for
-    -- setting the timer.
+    --
     @recv = recv
     @recv.session = self
-
     -- first, send the open frame
     if @readyState == Transport.CONNECTING
-      @recv\doSendFrame 'o'
+      @recv\send_frame 'o'
       @readyState = Transport.OPEN
-      -- emit the open event, but not right now
-      -- TODO: nexttick in luvit?
-      set_timeout 0, @emit_open
-
-    -- at this point the transport might have gotten away (jsonp).
-    if not @recv
-      return
-    @tryFlush()
+      -- emit connection event
+      set_timeout 0, @emit_connection_event
+    @flush()
     return
 
   unregister: =>
@@ -139,19 +149,20 @@ class Session
     @to_tref = set_timeout @disconnect_delay, @timeout_cb
     return
 
-  tryFlush: =>
+  flush: =>
     p('TRYFLUSH', @sid, @send_buffer)
     if #@send_buffer > 0
-      sb = @send_buffer
+      messages = @send_buffer
       @send_buffer = {}
-      @recv\doSendBulk sb
+      p('SENDBULK', messages)
+      @recv\send_frame 'a' .. JSON.encode(messages)
     else
       if @to_tref
         clear_timer @to_tref
       x = ->
         if @recv
           @to_tref = set_timeout @heartbeat_delay, x
-          @recv\doSendFrame 'h'
+          @recv\send_frame 'h'
       @to_tref = set_timeout @heartbeat_delay, x
     return
 
@@ -167,120 +178,28 @@ class Session
       @sid = nil
     return
 
-  didMessage: (payload) =>
+  onmessage: (payload) =>
     p('INCOME', @sid, payload)
     if @readyState == Transport.OPEN
       @emit 'message', payload
-      -- FIXME: this is for testing echo server!!!
-      @send payload
     return
 
   send: (payload) =>
-    p('SEND?', @sid, payload)
-    if @readyState != Transport.OPEN
-      error 'INVALID_STATE_ERR'
-    p('SEND!', @sid, payload)
+    return false if @readyState != Transport.OPEN
+    p('SEND', @sid, payload)
     Table.insert @send_buffer, tostring(payload)
-    if @recv
-      @tryFlush()
+    @flush() if @recv
+    true
 
   close: (status = 1000, reason = 'Normal closure') =>
-    p('CLOSEORDERLY', @sid, status)
-    if @readyState != Transport.OPEN
-      return false
+    p('CLOSE', @sid, status)
+    return false if @readyState != Transport.OPEN
     @readyState = Transport.CLOSING
-    @close_frame = closeFrame status, reason
+    @close_frame = Transport.closing_frame status, reason
     if @recv
-      -- Go away.
-      @recv\doSendFrame @close_frame
-      if @recv
-        @unregister
-
-class GenericReceiver
-  new: (@thingy) =>
-    @setUp()
-  setUp: =>
-    @thingy_end_cb = () -> @didClose 1006, 'Connection closed'
-    @thingy\on 'end', @thingy_end_cb
-  tearDown: =>
-    @thingy\remove_listener 'end', @thingy_end_cb
-    @thingy_end_cb = nil
-  didClose: (status, reason) =>
-    if @thingy
-      @tearDown()
-      @thingy = nil
-    if @session
-      @session\unregister status, reason
-  doSendBulk: (messages) =>
-    p('SENDBULK', messages)
-    @doSendFrame 'a' .. JSON.encode(messages)
-
--- write stuff to response, using chunked encoding if possible
-class ResponseReceiver extends GenericReceiver
-  max_response_size: nil
-
-  new: (@response) =>
-    @curr_response_size = 0
-    --!!!try
-    --@response\setKeepAlive true, 5000
-    --!!!catch x
-    super @response
-    if @max_response_size == nil
-      @max_response_size = 128000 --TODO@options.response_limit
-
-  doSendFrame: (payload) =>
-    @curr_response_size = @curr_response_size + #payload
-    p('DOSENDFRAME', payload, @curr_response_size, @max_response_size)
-    r = false
-    --!!!try
-    @response\safe_write payload
-    r = true
-    --!!!catch x
-    if @max_response_size and @curr_response_size >= @max_response_size
-      @didClose()
-    return r
-
-  didClose: =>
-    p('DIDCLOSE')
-    super()
-    --!!!try
-    @response\close()
-    --!!!catch x
-    @response = nil
-
-
-
-class XhrStreamingReceiver extends ResponseReceiver
-  protocol: 'xhr-streaming'
-  doSendFrame: (payload) =>
-    super(payload .. '\n')
-
-class XhrPollingReceiver extends XhrStreamingReceiver
-  protocol: 'xhr'
-  max_response_size: 1
-
-class JsonpReceiver extends ResponseReceiver
-  protocol: 'jsonp'
-  max_response_size: 1
-  new: (res, @callback) =>
-    super res
-  doSendFrame: (payload) =>
-    -- Yes, JSONed twice, there isn't a a better way, we must pass
-    -- a string back, and the script, will be evaled() by the
-    -- browser.
-    super(@callback .. '(' .. JSON.encode(payload) .. ');\r\n')
-
-class HtmlFileReceiver extends ResponseReceiver
-  protocol: 'htmlfile'
-  doSendFrame: (payload) =>
-    super('<script>\np(' .. JSON.encode(payload) .. ');\n</script>\r\n')
-
-class EventSourceReceiver extends ResponseReceiver
-  protocol: 'eventsource'
-  doSendFrame: (payload) =>
-    -- beware of leading whitespace
-    --super('data: ' .. TODO(payload, '\r\n\x00') .. '\r\n\r\n')
-    super('data: ' .. String.url_encode(payload) .. '\r\n\r\n')
+      @recv\send_frame @close_frame
+      @unregister
+    return
 
 --
 -- specific Response helpers
@@ -311,6 +230,24 @@ handle_balancer_cookie = () =>
   jsid = cookies['JSESSIONID'] or 'dummy'
   @set_header 'Set-Cookie', 'JSESSIONID=' .. jsid .. '; path=/'
 
+
+--
+-- upgrade Response to Session handler
+--
+
+Response = require 'response'
+Response.prototype.do_reasoned_close = (status, reason) =>
+  p('DOCLOSE', status, reason)
+  @close()
+  if @session
+    @session\unregister status, reason
+Response.prototype.write_frame = (payload) =>
+  @curr_size = @curr_size + #payload
+  p('DOSENDFRAME', payload, @curr_size, @max_size)
+  @write payload
+  if @max_size and @curr_size >= @max_size
+    @do_reasoned_close()
+
 return (options = {}) ->
 
   -- defaults
@@ -325,6 +262,10 @@ return (options = {}) ->
       handle_balancer_cookie self
       data = nil
       process = ->
+        -- FIXME: workaround -- one-timer guard while luvit
+        -- doesn't report 'end' for null bodied requests
+        return if @processed
+        @processed = true
         p('BODY', data)
         if data == ''
           p('-------------------------------------------------------------------------')
@@ -335,7 +276,7 @@ return (options = {}) ->
         p('FOUND TARGET!', sid)
         ctype = @req.headers['content-type'] or ''
         ctype = String.match ctype, '[^;]*'
-        data = nil if not allowed_types.xhr[ctype]
+        data = nil if not allowed_content_types.xhr[ctype]
         p('BODYPREDEC', data, ctype, @req.headers['content-type'])
         return @fail 'Payload expected.' if not data
         status, data = pcall JSON.decode, data
@@ -346,7 +287,7 @@ return (options = {}) ->
         -- process message
         for message in *data
           --p('message', message)
-          session\didMessage message
+          session\onmessage message
         -- respond ok
         @send 204, nil, {
           ['Content-Type']: 'text/plain' -- for FF
@@ -359,6 +300,7 @@ return (options = {}) ->
       @req\on 'data', (chunk) ->
         --p('chunk', chunk)
         data = if data then data .. chunk else chunk
+        process()
         return
       return
 
@@ -368,6 +310,10 @@ return (options = {}) ->
       handle_balancer_cookie self
       data = nil
       process = ->
+        -- FIXME: workaround -- one-timer guard while luvit
+        -- doesn't report 'end' for null bodied requests
+        return if @processed
+        @processed = true
         --p('BODY', data)
         -- bail out unless such session exists
         -- FIXME: why it can't be done before end of request?
@@ -376,7 +322,7 @@ return (options = {}) ->
         --p('FOUND TARGET!', sid)
         ctype = @req.headers['content-type'] or ''
         ctype = String.match ctype, '[^;]*'
-        decoder = allowed_types.jsonp[ctype]
+        decoder = allowed_content_types.jsonp[ctype]
         data = nil if not decoder
         -- FIXME: data can be uri.query.d
         if data and decoder != true
@@ -391,7 +337,7 @@ return (options = {}) ->
         return @fail 'Payload expected.' if not is_array data
         -- process message
         for message in *data
-          session\didMessage message
+          session\onmessage message
         -- respond ok
         @send 200, 'ok', {
           ['Content-Length']: 2
@@ -404,6 +350,7 @@ return (options = {}) ->
       @req\on 'data', (chunk) ->
         --p('chunk', chunk)
         data = if data then data .. chunk else chunk
+        process()
         return
       return
 
@@ -415,9 +362,15 @@ return (options = {}) ->
       @send 200, nil, {
         ['Content-Type']: 'application/javascript; charset=UTF-8'
       }, false
+      -- upgrade response to session handler
+      @protocol = 'xhr'
+      @curr_size, @max_size = 0, 1
+      @send_frame = (payload) =>
+        @write_frame(payload .. '\n')
+      @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
       -- register session
       session = Session.get_or_create sid, options
-      session\register XhrPollingReceiver self
+      session\register self
       return
 
     -- xhr_streaming
@@ -427,13 +380,21 @@ return (options = {}) ->
       handle_balancer_cookie self
       -- IE requires 2KB prefix:
       -- http://blogs.msdn.com/b/ieinternals/archive/2010/04/06/comet-streaming-in-internet-explorer-with-xmlhttprequest-and-xdomainrequest.aspx
-      content = String.rep('h', 2049) .. '\n'
+      content = String.rep('h', 2048) .. '\n'
       @send 200, content, {
         ['Content-Type']: 'application/javascript; charset=UTF-8'
       }, false
+      @write('\000')
+      -- upgrade response to session handler
+      @protocol = 'xhr-streaming'
+      @curr_size, @max_size = 0, options.response_limit
+      @send_frame = (payload) =>
+        @write_frame(payload .. '\n')
+        @write('\000')
+      @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
       -- register session
       session = Session.get_or_create sid, options
-      session\register XhrStreamingReceiver self
+      session\register self
       return
 
     -- jsonp (polling)
@@ -446,9 +407,15 @@ return (options = {}) ->
         ['Content-Type']: 'application/javascript; charset=UTF-8'
         ['Cache-Control']: 'no-store, no-cache, must-revalidate, max-age=0'
       }, false
-      -- register session here
+      -- upgrade response to session handler
+      @protocol = 'jsonp'
+      @curr_size, @max_size = 0, 1
+      @send_frame = (payload) =>
+        @write_frame(callback .. '(' .. JSON.encode(payload) .. ');\r\n')
+      @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
+      -- register session
       session = Session.get_or_create sid, options
-      session\register JsonpReceiver self, callback
+      session\register self
       return
 
     -- htmlfile
@@ -462,9 +429,17 @@ return (options = {}) ->
         ['Content-Type']: 'text/html; charset=UTF-8'
         ['Cache-Control']: 'no-store, no-cache, must-revalidate, max-age=0'
       }, false
-      -- register session here
+      @write('\000')
+      -- upgrade response to session handler
+      @protocol = 'htmlfile'
+      @curr_size, @max_size = 0, options.response_limit
+      @send_frame = (payload) =>
+        @write_frame('<script>\np(' .. JSON.encode(payload) .. ');\n</script>\r\n')
+        @write('\000')
+      @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
+      -- register session
       session = Session.get_or_create sid, options
-      session\register HtmlFileReceiver self
+      session\register self
       return
 
     -- eventsource
@@ -476,28 +451,51 @@ return (options = {}) ->
         ['Content-Type']: 'text/event-stream; charset=UTF-8'
         ['Cache-Control']: 'no-store, no-cache, must-revalidate, max-age=0'
       }, false
-      -- register session here
+      @write('\000')
+      -- upgrade response to session handler
+      @protocol = 'eventsource'
+      @curr_size, @max_size = 0, options.response_limit
+      @send_frame = (payload) =>
+        @write_frame('data: ' .. escape_for_eventsource(payload) .. '\r\n\r\n')
+        @write('\000')
+      @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
+      -- register session
       session = Session.get_or_create sid, options
-      session\register EventSourceReceiver self
+      session\register self
       return
 
-    -- websockets
-    ['(%w+) ${prefix}/[^./]+/([^./]+)/websocket[/]?$' % options]: (nxt, verb, sid) =>
-      p('WEBSOCKET', @req)
-      if verb != 'GET'
-        return @send 405
-      if String.lower(@req.headers.upgrade or '') != 'websocket'
-        return @send 400, 'Can "Upgrade" only to "WebSocket".'
-      if String.lower(@req.headers.connection or '') != 'upgrade'
-        return @send 400, '"Connection" must be "Upgrade".'
-      origin = @req.headers.origin
-      --TODOif not verify_origin(origin, @options.origins)
-      --TODO  return @send 400, 'Unverified origin.'
-      location = (if origin and origin[1..5] == 'https' then 'wss' else 'ws')
-      location = location .. '://' .. @req.headers.host .. @req.url
-      ver = @req.headers['sec-websocket-version']
-      shaker = if ver == '8' or ver == '7' then WebHandshake8 else WebHandshakeHixie76
-      shaker options, @req, self, (head or ''), origin, location
+    -- chunking_test
+
+    ['POST ${prefix}/chunking_test[/]?$' % options]: (nxt) =>
+      handle_xhr_cors self
+      @send 200, nil, {
+        ['Content-Type']: 'application/javascript; charset=UTF-8' -- for FF
+      }, false
+      @req\on 'error', (err) ->
+        p('error', err)
+        return
+      @req\on 'end', () ->
+        @write (String.rep ' ', 2048) .. 'h\n'
+        @write '\000'
+        for k, delay in ipairs {5, 25+5, 125+25+5, 625+125+25+5, 3125+625+125+25+5}
+          set_timeout delay, () ->
+            @write 'h\n'
+            @write '\000'
+            if k == 5
+              @close()
+        return
+      return
+
+    ['OPTIONS ${prefix}/chunking_test[/]?$' % options]: (nxt) =>
+      handle_xhr_cors self
+      handle_balancer_cookie self
+      @send 204, nil, {
+        ['Allow']: 'OPTIONS, POST'
+        ['Cache-Control']: 'public, max-age=${cache_age}' % options
+        ['Expires']: date('%c', time() + options.cache_age)
+        ['Access-Control-Max-Age']: tostring(options.cache_age)
+      }
+      return
 
     -- OPTIONS
 
@@ -546,6 +544,28 @@ return (options = {}) ->
       return
 
   }
+
+  -- optional websockets
+
+  if false
+    Table.insert routes, {
+    ['(%w+) ${prefix}/[^./]+/([^./]+)/websocket[/]?$' % options]: (nxt, verb, sid) =>
+      p('WEBSOCKET', @req)
+      if verb != 'GET'
+        return @send 405
+      if String.lower(@req.headers.upgrade or '') != 'websocket'
+        return @send 400, 'Can "Upgrade" only to "WebSocket".'
+      if String.lower(@req.headers.connection or '') != 'upgrade'
+        return @send 400, '"Connection" must be "Upgrade".'
+      origin = @req.headers.origin
+      --TODOif not verify_origin(origin, @options.origins)
+      --TODO  return @send 400, 'Unverified origin.'
+      location = (if origin and origin[1..5] == 'https' then 'wss' else 'ws')
+      location = location .. '://' .. @req.headers.host .. @req.url
+      ver = @req.headers['sec-websocket-version']
+      shaker = if ver == '8' or ver == '7' then WebHandshake8 else WebHandshakeHixie76
+      shaker options, @req, self, (head or ''), origin, location
+    }
 
   for k, v in pairs(routes)
     p(k)

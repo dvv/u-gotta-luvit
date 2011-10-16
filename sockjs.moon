@@ -1,3 +1,5 @@
+EventEmitter = setmetatable({}, {__index: require('emitter').meta})
+
 require 'lib/util'
 Stack = require 'lib/stack'
 Math = require 'math'
@@ -5,18 +7,19 @@ Math = require 'math'
 
 -- tests
 [==[
+BaseUrlGreeting IframePage Protocol SessionURLs ChunkingTest XhrPolling JsonPolling EventSource HtmlFile XhrStreaming
 BaseUrlGreeting
 ---ChunkingTest
-EventSource
-HtmlFile
 IframePage
+XhrPolling
 JsonPolling
 Protocol
 SessionURLs
 WebsocketHixie76
 WebsocketHttpErrors
 WebsocketHybi10
-XhrPolling
+EventSource
+HtmlFile
 XhrStreaming
 ]==]
 
@@ -35,7 +38,8 @@ layers = () -> {
     cache_age: 365 * 24 * 60 * 60 -- one year
     get_nonce: () -> Math.random()
     onconnection: (conn) ->
-      p('CONN', conn)
+      p('CONN') --, conn)
+      conn\on 'message', (m) -> conn\send m
   })
 
   -- serve chrome page
@@ -54,5 +58,4 @@ layers = () -> {
 }
 
 s1 = Stack(layers())\run(8080)
---s1\on 'upgrade', (...) -> p('UPGRADE', ...)
 print('Server listening at http://localhost:8080/')

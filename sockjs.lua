@@ -1,18 +1,22 @@
+local EventEmitter = setmetatable({ }, {
+  __index = require('emitter').meta
+})
 require('lib/util')
 local Stack = require('lib/stack')
 local Math = require('math')
-local _ = [==[BaseUrlGreeting
+local _ = [==[BaseUrlGreeting IframePage Protocol SessionURLs ChunkingTest XhrPolling JsonPolling EventSource HtmlFile XhrStreaming
+BaseUrlGreeting
 ---ChunkingTest
-EventSource
-HtmlFile
 IframePage
+XhrPolling
 JsonPolling
 Protocol
 SessionURLs
 WebsocketHixie76
 WebsocketHttpErrors
 WebsocketHybi10
-XhrPolling
+EventSource
+HtmlFile
 XhrStreaming
 ]==]
 local layers
@@ -33,7 +37,10 @@ layers = function()
         return Math.random()
       end,
       onconnection = function(conn)
-        return p('CONN', conn)
+        p('CONN')
+        return conn:on('message', function(m)
+          return conn:send(m)
+        end)
       end
     }),
     Stack.use('route')({

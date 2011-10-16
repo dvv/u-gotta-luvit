@@ -22,6 +22,7 @@ Stack = (function()
         host = '0.0.0.0'
       end
       local server = require('http').create_server(host, port, self.handler)
+      server:on('upgrade', self.handler)
       return server
     end
   }
