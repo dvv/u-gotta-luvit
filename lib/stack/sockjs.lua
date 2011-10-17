@@ -95,6 +95,7 @@ Session = (function()
       return session
     end,
     register = function(self, recv)
+      p('REGISTER', self.sid, not not self.recv)
       if self.recv then
         recv:send_frame(Transport.closing_frame(2010, 'Another connection still open'))
         return 
@@ -119,6 +120,7 @@ Session = (function()
       return 
     end,
     unregister = function(self)
+      p('UNREGISTER', self.sid)
       self.recv.session = nil
       self.recv = nil
       if self.to_tref then
@@ -259,17 +261,32 @@ handle_balancer_cookie = function(self)
 end
 local Response = require('response')
 Response.prototype.do_reasoned_close = function(self, status, reason)
-  self:close()
+  p('CLOSE', self.session and self.session.sid, status, reason)
   if self.session then
-    return self.session:unregister(status, reason)
+    self.session:unregister()
   end
+  self:close()
+  return 
 end
 Response.prototype.write_frame = function(self, payload)
   self.curr_size = self.curr_size + #payload
-  self:write(payload)
-  if self.max_size and self.curr_size >= self.max_size then
-    return self:do_reasoned_close()
+  local _ = [==[  @write payload, (...) ->
+    p('WRITTEN', ...)
+    if @max_size and @curr_size >= @max_size
+      p('MAX SIZE EXCEEDED')
+      --set_timeout 0, () -> @do_reasoned_close()
+      @do_reasoned_close()
+  ]==]
+  local status, err = pcall(self.write, self, payload)
+  p('WRITTEN', status, err)
+  if not status then
+    p('SIGPIPE', err)
   end
+  if self.max_size and self.curr_size >= self.max_size then
+    p('MAX SIZE EXCEEDED')
+    self:do_reasoned_close()
+  end
+  return 
 end
 return function(options)
   if options == nil then
@@ -420,8 +437,13 @@ return function(options)
       self.protocol = 'xhr'
       self.curr_size, self.max_size = 0, 1
       self.send_frame = function(self, payload)
+        p('SEND', self.session and self.session.sid, payload)
         return self:write_frame(payload .. '\n')
       end
+      local _ = [==[      @on 'error', (code) ->
+        p('ERROR', code)
+        @close!
+      ]==]
       self:on('end', function()
         return self:do_reasoned_close(1006, 'Connection closed')
       end)
@@ -604,18 +626,18 @@ return function(options)
       end)())
       location = location .. '://' .. self.req.headers.host .. self.req.url
       local ver = self.req.headers['sec-websocket-version']
-      local shaker = require('lib/stack/sockjs-websocket').handshake
-      shaker(self, origin, location)
       self:nodelay(true)
       self.protocol = 'websocket'
       self.curr_size, self.max_size = 0, options.response_limit
       self.send_frame = function(self, payload)
-        self:write_frame('\0000')
-        self:write_frame(payload)
-        return self:write_frame('\ffff')
+        p('SEND', payload)
+        return self:write_frame('\000' .. payload .. '\255')
       end
       local session = Session.get_or_create(nil, options)
-      session:register(self)
+      local shaker = require('lib/stack/sockjs-websocket').handshake
+      shaker(self, origin, location, function()
+        return session:register(self)
+      end)
       return 
     end
   }

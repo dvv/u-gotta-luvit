@@ -1,0 +1,610 @@
+diff --git a/lib/stack/sockjs-websocket.lua b/lib/stack/sockjs-websocket.lua
+index c8ed039..81247be 100644
+--- a/lib/stack/sockjs-websocket.lua
++++ b/lib/stack/sockjs-websocket.lua
+@@ -32,36 +32,39 @@ validate_crypto = function(req_headers, nonce)
+       return false
+     end
+     n = n / spaces
+-    p('S!', n, spaces)
++    p('S!', n, spaces, floor(n / 16777216) % 255, floor(n / 65536) % 255, floor(n / 256) % 255, n % 255)
+     local s = String.char(floor(n / 16777216) % 255, floor(n / 65536) % 255, floor(n / 256) % 255, n % 255)
+     md5:update(s)
+   end
+-  md5:update(String.byte(nonce))
++  md5:update(nonce)
+   return md5:final()
+ end
+ local handshake
+-handshake = function(self, origin, location)
++handshake = function(self, origin, location, cb)
+   p('SHAKE', self, origin, location, self.req.head)
+   self.sec = self.req.headers['sec-websocket-key1']
+   local wsp = self.sec and self.req.headers['sec-websocket-protocol']
+   local prefix = self.sec and 'Sec-' or ''
+-  local _ = [==[  blob = {
+-    'HTTP/1.1 101 WebSocket Protocol Handshake'
+-    'Upgrade: WebSocket'
+-    'Connection: Upgrade'
+-    prefix .. 'WebSocket-Origin: ' .. origin
++  local blob = {
++    'HTTP/1.1 101 WebSocket Protocol Handshake',
++    'Upgrade: WebSocket',
++    'Connection: Upgrade',
++    prefix .. 'WebSocket-Origin: ' .. origin,
+     prefix .. 'WebSocket-Location: ' .. location
+   }
+-  if wsp
+-    Table.insert blob, ('Sec-WebSocket-Protocol: ' .. @req.headers['sec-websocket-protocol'].split('[^,]*'))
+-  @write(Table.concat(blob, '\r\n') .. '\r\n\r\n')
+-  ]==]
+   if wsp then
+-    self:set_header('Sec-WebSocket-Protocol: ', self.req.headers['sec-websocket-protocol'].split('[^,]*'))
++    Table.insert(blob, ('Sec-WebSocket-Protocol: ' .. self.req.headers['sec-websocket-protocol'].split('[^,]*')))
+   end
++  self:on('end', function()
++    return p('ENDED????')
++  end)
++  p('P1')
++  self:write(Table.concat(blob, '\r\n') .. '\r\n\r\n')
++  p('P2')
+   local data = ''
+   local ondata
+   ondata = function(chunk)
++    p('DATA', chunk)
+     if chunk then
+       data = data .. chunk
+     end
+@@ -107,25 +110,21 @@ handshake = function(self, origin, location)
+         data = slice(data, 9)
+         local reply = validate_crypto(self.req.headers, nonce)
+         if not reply then
++          p('NOTREPLY')
+           self:do_reasoned_close()
+           return 
+         end
+-        self:send(101, reply, {
+-          ['Upgrade'] = 'WebSocket',
+-          ['Connection'] = 'Upgrade',
+-          [prefix .. 'WebSocket-Origin'] = origin,
+-          [prefix .. 'WebSocket-Location'] = location
+-        }, false)
++        p('REPLY', reply)
++        self:on('data', ondata)
++        local status, err = pcall(self.write, self, reply)
++        p('REPLYWRITTEN', status, err)
++        cb()
+       end
+-      self:on('data', ondata)
+     end
+     return 
+   end
+   self:on('data', wait_for_nonce)
+-  wait_for_nonce(self.req.head or '')
+-  return self:on('end', function()
+-    return self:do_reasoned_close(1006, 'Connection closed')
+-  end)
++  return wait_for_nonce(self.req.head or '')
+ end
+ return {
+   handshake = handshake
+diff --git a/lib/stack/sockjs.lua b/lib/stack/sockjs.lua
+index a734a75..2eafaed 100644
+--- a/lib/stack/sockjs.lua
++++ b/lib/stack/sockjs.lua
+@@ -95,6 +95,7 @@ Session = (function()
+       return session
+     end,
+     register = function(self, recv)
++      p('REGISTER', self.sid, not not self.recv)
+       if self.recv then
+         recv:send_frame(Transport.closing_frame(2010, 'Another connection still open'))
+         return 
+@@ -119,6 +120,7 @@ Session = (function()
+       return 
+     end,
+     unregister = function(self)
++      p('UNREGISTER', self.sid)
+       self.recv.session = nil
+       self.recv = nil
+       if self.to_tref then
+@@ -259,17 +261,38 @@ handle_balancer_cookie = function(self)
+ end
+ local Response = require('response')
+ Response.prototype.do_reasoned_close = function(self, status, reason)
+-  self:close()
++  p('CLOSE', self.session and self.session.sid, status, reason)
+   if self.session then
+-    return self.session:unregister(status, reason)
++    local _ = (function()
++      local _base_0 = self.session
++      local _fn_0 = _base_0.unregister
++      return function(...)
++        return _fn_0(_base_0, ...)
++      end
++    end)()
+   end
++  self:close()
++  return 
+ end
+ Response.prototype.write_frame = function(self, payload)
+   self.curr_size = self.curr_size + #payload
+-  self:write(payload)
++  local _ = [==[  @write payload, (...) ->
++    p('WRITTEN', ...)
++    if @max_size and @curr_size >= @max_size
++      p('MAX SIZE EXCEEDED')
++      --set_timeout 0, () -> @do_reasoned_close()
++      @do_reasoned_close()
++  ]==]
++  local status, err = pcall(self.write, self, payload)
++  p('WRITTEN', status, err)
++  if not status then
++    p('SIGPIPE', err)
++  end
+   if self.max_size and self.curr_size >= self.max_size then
+-    return self:do_reasoned_close()
++    p('MAX SIZE EXCEEDED')
++    self:do_reasoned_close()
+   end
++  return 
+ end
+ return function(options)
+   if options == nil then
+@@ -420,8 +443,13 @@ return function(options)
+       self.protocol = 'xhr'
+       self.curr_size, self.max_size = 0, 1
+       self.send_frame = function(self, payload)
++        p('SEND', self.session and self.session.sid, payload)
+         return self:write_frame(payload .. '\n')
+       end
++      self:on('error', function(code)
++        p('ERROR', code)
++        return self:close()
++      end)
+       self:on('end', function()
+         return self:do_reasoned_close(1006, 'Connection closed')
+       end)
+@@ -604,18 +632,18 @@ return function(options)
+       end)())
+       location = location .. '://' .. self.req.headers.host .. self.req.url
+       local ver = self.req.headers['sec-websocket-version']
+-      local shaker = require('lib/stack/sockjs-websocket').handshake
+-      shaker(self, origin, location)
+       self:nodelay(true)
+       self.protocol = 'websocket'
+       self.curr_size, self.max_size = 0, options.response_limit
+       self.send_frame = function(self, payload)
+-        self:write_frame('\0000')
+-        self:write_frame(payload)
+-        return self:write_frame('\ffff')
++        p('SEND', payload)
++        return self:write_frame('\000' .. payload .. '\255')
+       end
+       local session = Session.get_or_create(nil, options)
+-      session:register(self)
++      local shaker = require('lib/stack/sockjs-websocket').handshake
++      shaker(self, origin, location, function()
++        return session:register(self)
++      end)
+       return 
+     end
+   }
+diff --git a/nodelay.diff b/nodelay.diff
+index b373f3f..595acc1 100644
+--- a/nodelay.diff
++++ b/nodelay.diff
+@@ -1,24 +1,3 @@
+-diff --git a/deps/luajit b/deps/luajit
+---- a/deps/luajit
+-+++ b/deps/luajit
+-@@ -1 +1 @@
+--Subproject commit 120c3adbff2acbbee5932f28345cde292ef044ec
+-+Subproject commit 120c3adbff2acbbee5932f28345cde292ef044ec-dirty
+-diff --git a/examples/timers-simple.lua b/examples/timers-simple.lua
+-index 4015e10..2bc4499 100644
+---- a/examples/timers-simple.lua
+-+++ b/examples/timers-simple.lua
+-@@ -9,5 +9,10 @@ Timer.set_timeout(1000, function ()
+-   p("on_timeout!")
+-   Timer.clear_timer(interval)
+- end)
+-+print("Starting 2000ms timer with parameters")
+-+Timer.set_timeout(1000, function (...)
+-+  p("on_timeout!", ...)
+-+  Timer.clear_timer(interval)
+-+end, 1, 2, 3)
+- 
+- 
+ diff --git a/lib/http.lua b/lib/http.lua
+ index 6d7d429..5ceed7c 100644
+ --- a/lib/http.lua
+@@ -56,35 +35,6 @@ index 6d7d429..5ceed7c 100644
+    return server
+  end
+  
+-diff --git a/lib/timer.lua b/lib/timer.lua
+-index 4a66b91..57725e0 100644
+---- a/lib/timer.lua
+-+++ b/lib/timer.lua
+-@@ -1,18 +1,20 @@
+- local UV = require('uv')
+- 
+--local function set_timeout(duration, callback)
+-+local function set_timeout(duration, callback, ...)
+-+  local args = {...}
+-   local timer = UV.new_timer()
+-   timer:start(duration, 0, function (status)
+-     timer:close()
+--    callback()
+-+    callback(unpack(args))
+-   end)
+-   return timer
+- end
+- 
+--local function set_interval(period, callback)
+-+local function set_interval(period, callback, ...)
+-+  local args = {...}
+-   local timer = UV.new_timer()
+-   timer:start(period, period, function (status)
+--    callback()
+-+    callback(unpack(args))
+-   end)
+-   return timer
+- end
+ diff --git a/src/lhttp_parser.c b/src/lhttp_parser.c
+ index 4046e96..174f01c 100644
+ --- a/src/lhttp_parser.c
+diff --git a/sockjs-example.lua b/sockjs-example.lua
+index b386063..f4bbe1b 100644
+--- a/sockjs-example.lua
++++ b/sockjs-example.lua
+@@ -12,7 +12,7 @@ layers = function()
+       prefix = '/echo',
+       sockjs_url = '/public/sockjs.js',
+       onconnection = function(conn)
+-        p('CONN')
++        p('CONN', conn.sid)
+         return conn:on('message', function(m)
+           return conn:send(m)
+         end)
+diff --git a/sockjs-example.moon b/sockjs-example.moon
+index 95d9425..533cc59 100644
+--- a/sockjs-example.moon
++++ b/sockjs-example.moon
+@@ -11,7 +11,7 @@ layers = () -> {
+     prefix: '/echo'
+     sockjs_url: '/public/sockjs.js'
+     onconnection: (conn) ->
+-      p('CONN') --, conn)
++      p('CONN', conn.sid)
+       conn\on 'message', (m) -> conn\send m
+   }))
+ 
+diff --git a/src/stack/sockjs-websocket.moon b/src/stack/sockjs-websocket.moon
+index 1a23678..d654c7b 100644
+--- a/src/stack/sockjs-websocket.moon
++++ b/src/stack/sockjs-websocket.moon
+@@ -23,18 +23,17 @@ validate_crypto = (req_headers, nonce) ->
+     if spaces == 0 or n % spaces != 0
+       return false
+     n = n / spaces
+-    p('S!', n, spaces)
++    p('S!', n, spaces, floor(n/16777216)%255, floor(n/65536)%255, floor(n/256)%255, n%255)
+     s = String.char(floor(n/16777216)%255, floor(n/65536)%255, floor(n/256)%255, n%255)
+     md5\update s
+-  md5\update String.byte nonce
++  md5\update nonce
+   md5\final()
+ 
+-handshake = (origin, location) =>
++handshake = (origin, location, cb) =>
+   p('SHAKE', self, origin, location, @req.head)
+   @sec = @req.headers['sec-websocket-key1']
+   wsp = @sec and @req.headers['sec-websocket-protocol']
+   prefix = @sec and 'Sec-' or ''
+-  [==[
+   blob = {
+     'HTTP/1.1 101 WebSocket Protocol Handshake'
+     'Upgrade: WebSocket'
+@@ -44,22 +43,17 @@ handshake = (origin, location) =>
+   }
+   if wsp
+     Table.insert blob, ('Sec-WebSocket-Protocol: ' .. @req.headers['sec-websocket-protocol'].split('[^,]*'))
+-  @write(Table.concat(blob, '\r\n') .. '\r\n\r\n')
+-  ]==]
+-  if wsp
+-    @set_header 'Sec-WebSocket-Protocol: ', @req.headers['sec-websocket-protocol'].split('[^,]*')
+-  [==[
+-  @send 101, nil, {
+-    ['Upgrade']: 'WebSocket'
+-    ['Connection']: 'Upgrade'
+-    [prefix .. 'WebSocket-Origin']: origin
+-    [prefix .. 'WebSocket-Location']: location
+-  }, false
+-  ]==]
+ 
++  @on 'end', () ->
++    p('ENDED????')
++    --@do_reasoned_close 1006, 'Connection closed'
++  p('P1')
++  @write(Table.concat(blob, '\r\n') .. '\r\n\r\n')
++  p('P2')
+   data = ''
+   -- parse incoming data
+   ondata = (chunk) ->
++    p('DATA', chunk)
+     if chunk
+       data = data .. chunk
+     buf = data
+@@ -92,25 +86,18 @@ handshake = (origin, location) =>
+         data = slice data, 9
+         reply = validate_crypto @req.headers, nonce
+         if not reply
++          p('NOTREPLY')
+           @do_reasoned_close()
+           return
+-        --p('REPLY', reply)
+-        --@write reply
+-
+-        @send 101, reply, {
+-          ['Upgrade']: 'WebSocket'
+-          ['Connection']: 'Upgrade'
+-          [prefix .. 'WebSocket-Origin']: origin
+-          [prefix .. 'WebSocket-Location']: location
+-        }, false
+-
+-      @on 'data', ondata
++        p('REPLY', reply)
++        @on 'data', ondata
++        status, err = pcall @write, self, reply
++        p('REPLYWRITTEN', status, err)
++        cb!
+     return
+   @on 'data', wait_for_nonce
+   wait_for_nonce(@req.head or '')
+ 
+-  @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
+-
+ --return WebHandshakeHixie76
+ return {
+   handshake: handshake
+diff --git a/src/stack/sockjs.moon b/src/stack/sockjs.moon
+index 63b7feb..15a041e 100644
+--- a/src/stack/sockjs.moon
++++ b/src/stack/sockjs.moon
+@@ -121,6 +121,7 @@ class Session extends EventEmitter
+       options.onconnection self
+ 
+   register: (recv) =>
++    p('REGISTER', @sid, not not @recv)
+     if @recv
+       recv\send_frame Transport.closing_frame(2010, 'Another connection still open')
+       return
+@@ -140,10 +141,11 @@ class Session extends EventEmitter
+       @readyState = Transport.OPEN
+       -- emit connection event
+       set_timeout 0, @emit_connection_event
+-    @flush()
++    @flush!
+     return
+ 
+   unregister: =>
++    p('UNREGISTER', @sid)
+     @recv.session = nil
+     @recv = nil
+     if @to_tref
+@@ -233,15 +235,32 @@ handle_balancer_cookie = () =>
+ --
+ 
+ Response = require 'response'
++
+ Response.prototype.do_reasoned_close = (status, reason) =>
++  p('CLOSE', @session and @session.sid, status, reason)
++  @session\unregister if @session
+   @close()
+-  if @session
+-    @session\unregister status, reason
++  return
++
+ Response.prototype.write_frame = (payload) =>
+   @curr_size = @curr_size + #payload
+-  @write payload
++  [==[
++  @write payload, (...) ->
++    p('WRITTEN', ...)
++    if @max_size and @curr_size >= @max_size
++      p('MAX SIZE EXCEEDED')
++      --set_timeout 0, () -> @do_reasoned_close()
++      @do_reasoned_close()
++  ]==]
++  status, err = pcall @write, self, payload
++  p('WRITTEN', status, err)
++  if not status
++    p('SIGPIPE', err)
+   if @max_size and @curr_size >= @max_size
++    p('MAX SIZE EXCEEDED')
++    --set_timeout 0, () -> @do_reasoned_close()
+     @do_reasoned_close()
++  return
+ 
+ return (options = {}) ->
+ 
+@@ -359,7 +378,11 @@ return (options = {}) ->
+       @protocol = 'xhr'
+       @curr_size, @max_size = 0, 1
+       @send_frame = (payload) =>
++        p('SEND', @session and @session.sid, payload)
+         @write_frame(payload .. '\n')
++      @on 'error', (code) ->
++        p('ERROR', code)
++        @close!
+       @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
+       -- register session
+       session = Session.get_or_create sid, options
+@@ -400,14 +423,12 @@ return (options = {}) ->
+       }, false
+       -- N.B. these null-byte writes should be uncommented during automatic
+       -- test by means of sockjs-protocol *.py script
+-      --@write '\000'
+       -- upgrade response to session handler
+       @nodelay true
+       @protocol = 'xhr-streaming'
+       @curr_size, @max_size = 0, options.response_limit
+       @send_frame = (payload) =>
+         @write_frame(payload .. '\n')
+-        --@write '\000'
+       @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
+       -- register session
+       session = Session.get_or_create sid, options
+@@ -532,8 +553,6 @@ return (options = {}) ->
+     -- websockets
+   
+     ['(%w+) ${prefix}/[^./]+/[^./]+/websocket[/]?$' % options]: (nxt, verb) =>
+-      -- TODO: inhibit so far
+-      --return @send(404) if true
+       if verb != 'GET'
+         return @send 405
+       if String.lower(@req.headers.upgrade or '') != 'websocket'
+@@ -546,21 +565,24 @@ return (options = {}) ->
+       location = (if origin and origin[1..5] == 'https' then 'wss' else 'ws')
+       location = location .. '://' .. @req.headers.host .. @req.url
+       ver = @req.headers['sec-websocket-version']
+-      --shaker = if ver == '8' or ver == '7' then WebHandshake8 else WebHandshakeHixie76
+-      shaker = require('lib/stack/sockjs-websocket').handshake
+-      shaker self, origin, location
+-      --shaker options, @req, self, (@req.head or ''), origin, location
+       -- upgrade response to session handler
+       @nodelay true
+       @protocol = 'websocket'
+       @curr_size, @max_size = 0, options.response_limit
+       @send_frame = (payload) =>
+-        @write_frame '\0000'
+-        @write_frame payload
+-        @write_frame '\ffff'
++        p('SEND', payload)
++        @write_frame '\000' .. payload .. '\255'
++        --@write_frame '\000'
++        --@write_frame payload
++        --@write_frame '\255'
+       -- register session
+       session = Session.get_or_create nil, options
+-      session\register self
++      --session\register self
++      ---
++      ---
++      --shaker = if ver == '8' or ver == '7' then WebHandshake8 else WebHandshakeHixie76
++      shaker = require('lib/stack/sockjs-websocket').handshake
++      shaker self, origin, location, () -> session\register self
+       return
+   
+   }
+diff --git a/test.lua b/test.lua
+index 09a7829..fa3e318 100644
+--- a/test.lua
++++ b/test.lua
+@@ -1,21 +1,54 @@
+-local _ = [==[--EventEmitter = setmetatable({}, {__index: require('emitter').meta})
+-
+-obj = {
+-  bar: (...) => p('BAR', ...)
+-}
+-
+-class Foo
+-  new: (proto) =>
+-    p('NEW', self, proto)
+-    setmetatable self, __index: proto
+-  foo: -> p('FOO')
+-
+-foo = Foo obj
+-foo\foo!
+-foo\bar 1
+-]==]
+-local foo
+-foo = function()
+-  local a = 123
+-  return 
+-end
++local Foo
++Foo = (function()
++  local _parent_0 = nil
++  local _base_0 = {
++    foo = function()
++      return p('FOO')
++    end
++  }
++  _base_0.__index = _base_0
++  if _parent_0 then
++    setmetatable(_base_0, getmetatable(_parent_0).__index)
++  end
++  local _class_0 = setmetatable({
++    __init = function(self) end
++  }, {
++    __index = _base_0,
++    __call = function(cls, ...)
++      local _self_0 = setmetatable({}, _base_0)
++      cls.__init(_self_0, ...)
++      return _self_0
++    end
++  })
++  _base_0.__class = _class_0
++  return _class_0
++end)()
++local Bar
++Bar = (function()
++  local _parent_0 = Foo
++  local _base_0 = {
++    bar = function()
++      return p('BAR')
++    end
++  }
++  _base_0.__index = _base_0
++  if _parent_0 then
++    setmetatable(_base_0, getmetatable(_parent_0).__index)
++  end
++  local _class_0 = setmetatable({
++    __init = function(self, ...)
++      if _parent_0 then
++        return _parent_0.__init(self, ...)
++      end
++    end
++  }, {
++    __index = _base_0,
++    __call = function(cls, ...)
++      local _self_0 = setmetatable({}, _base_0)
++      cls.__init(_self_0, ...)
++      return _self_0
++    end
++  })
++  _base_0.__class = _class_0
++  return _class_0
++end)()
+diff --git a/test.moon b/test.moon
+index 77788b8..1db36e3 100644
+--- a/test.moon
++++ b/test.moon
+@@ -1,21 +1,6 @@
+-[==[
+---EventEmitter = setmetatable({}, {__index: require('emitter').meta})
+-
+-obj = {
+-  bar: (...) => p('BAR', ...)
+-}
+-
+ class Foo
+-  new: (proto) =>
+-    p('NEW', self, proto)
+-    setmetatable self, __index: proto
++  new: () =>
+   foo: -> p('FOO')
+ 
+-foo = Foo obj
+-foo\foo!
+-foo\bar 1
+-]==]
+-
+-foo = () ->
+-  a = 123
+-  return
++class Bar extends Foo
++  bar: -> p('BAR')

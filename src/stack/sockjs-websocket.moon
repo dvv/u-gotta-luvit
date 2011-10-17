@@ -23,18 +23,17 @@ validate_crypto = (req_headers, nonce) ->
     if spaces == 0 or n % spaces != 0
       return false
     n = n / spaces
-    p('S!', n, spaces)
+    p('S!', n, spaces, floor(n/16777216)%255, floor(n/65536)%255, floor(n/256)%255, n%255)
     s = String.char(floor(n/16777216)%255, floor(n/65536)%255, floor(n/256)%255, n%255)
     md5\update s
-  md5\update String.byte nonce
+  md5\update nonce
   md5\final()
 
-handshake = (origin, location) =>
+handshake = (origin, location, cb) =>
   p('SHAKE', self, origin, location, @req.head)
   @sec = @req.headers['sec-websocket-key1']
   wsp = @sec and @req.headers['sec-websocket-protocol']
   prefix = @sec and 'Sec-' or ''
-  [==[
   blob = {
     'HTTP/1.1 101 WebSocket Protocol Handshake'
     'Upgrade: WebSocket'
@@ -44,22 +43,17 @@ handshake = (origin, location) =>
   }
   if wsp
     Table.insert blob, ('Sec-WebSocket-Protocol: ' .. @req.headers['sec-websocket-protocol'].split('[^,]*'))
-  @write(Table.concat(blob, '\r\n') .. '\r\n\r\n')
-  ]==]
-  if wsp
-    @set_header 'Sec-WebSocket-Protocol: ', @req.headers['sec-websocket-protocol'].split('[^,]*')
-  [==[
-  @send 101, nil, {
-    ['Upgrade']: 'WebSocket'
-    ['Connection']: 'Upgrade'
-    [prefix .. 'WebSocket-Origin']: origin
-    [prefix .. 'WebSocket-Location']: location
-  }, false
-  ]==]
 
+  @on 'end', () ->
+    p('ENDED????')
+    --@do_reasoned_close 1006, 'Connection closed'
+  p('P1')
+  @write(Table.concat(blob, '\r\n') .. '\r\n\r\n')
+  p('P2')
   data = ''
   -- parse incoming data
   ondata = (chunk) ->
+    p('DATA', chunk)
     if chunk
       data = data .. chunk
     buf = data
@@ -92,24 +86,17 @@ handshake = (origin, location) =>
         data = slice data, 9
         reply = validate_crypto @req.headers, nonce
         if not reply
+          p('NOTREPLY')
           @do_reasoned_close()
           return
-        --p('REPLY', reply)
-        --@write reply
-
-        @send 101, reply, {
-          ['Upgrade']: 'WebSocket'
-          ['Connection']: 'Upgrade'
-          [prefix .. 'WebSocket-Origin']: origin
-          [prefix .. 'WebSocket-Location']: location
-        }, false
-
-      @on 'data', ondata
+        p('REPLY', reply)
+        @on 'data', ondata
+        status, err = pcall @write, self, reply
+        p('REPLYWRITTEN', status, err)
+        cb!
     return
   @on 'data', wait_for_nonce
   wait_for_nonce(@req.head or '')
-
-  @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
 
 --return WebHandshakeHixie76
 return {

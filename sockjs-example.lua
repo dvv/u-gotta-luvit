@@ -12,7 +12,7 @@ layers = function()
       prefix = '/echo',
       sockjs_url = '/public/sockjs.js',
       onconnection = function(conn)
-        p('CONN')
+        p('CONN', conn.sid)
         return conn:on('message', function(m)
           return conn:send(m)
         end)

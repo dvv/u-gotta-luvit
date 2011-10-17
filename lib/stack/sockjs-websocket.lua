@@ -32,36 +32,39 @@ validate_crypto = function(req_headers, nonce)
       return false
     end
     n = n / spaces
-    p('S!', n, spaces)
+    p('S!', n, spaces, floor(n / 16777216) % 255, floor(n / 65536) % 255, floor(n / 256) % 255, n % 255)
     local s = String.char(floor(n / 16777216) % 255, floor(n / 65536) % 255, floor(n / 256) % 255, n % 255)
     md5:update(s)
   end
-  md5:update(String.byte(nonce))
+  md5:update(nonce)
   return md5:final()
 end
 local handshake
-handshake = function(self, origin, location)
+handshake = function(self, origin, location, cb)
   p('SHAKE', self, origin, location, self.req.head)
   self.sec = self.req.headers['sec-websocket-key1']
   local wsp = self.sec and self.req.headers['sec-websocket-protocol']
   local prefix = self.sec and 'Sec-' or ''
-  local _ = [==[  blob = {
-    'HTTP/1.1 101 WebSocket Protocol Handshake'
-    'Upgrade: WebSocket'
-    'Connection: Upgrade'
-    prefix .. 'WebSocket-Origin: ' .. origin
+  local blob = {
+    'HTTP/1.1 101 WebSocket Protocol Handshake',
+    'Upgrade: WebSocket',
+    'Connection: Upgrade',
+    prefix .. 'WebSocket-Origin: ' .. origin,
     prefix .. 'WebSocket-Location: ' .. location
   }
-  if wsp
-    Table.insert blob, ('Sec-WebSocket-Protocol: ' .. @req.headers['sec-websocket-protocol'].split('[^,]*'))
-  @write(Table.concat(blob, '\r\n') .. '\r\n\r\n')
-  ]==]
   if wsp then
-    self:set_header('Sec-WebSocket-Protocol: ', self.req.headers['sec-websocket-protocol'].split('[^,]*'))
+    Table.insert(blob, ('Sec-WebSocket-Protocol: ' .. self.req.headers['sec-websocket-protocol'].split('[^,]*')))
   end
+  self:on('end', function()
+    return p('ENDED????')
+  end)
+  p('P1')
+  self:write(Table.concat(blob, '\r\n') .. '\r\n\r\n')
+  p('P2')
   local data = ''
   local ondata
   ondata = function(chunk)
+    p('DATA', chunk)
     if chunk then
       data = data .. chunk
     end
@@ -107,25 +110,21 @@ handshake = function(self, origin, location)
         data = slice(data, 9)
         local reply = validate_crypto(self.req.headers, nonce)
         if not reply then
+          p('NOTREPLY')
           self:do_reasoned_close()
           return 
         end
-        self:send(101, reply, {
-          ['Upgrade'] = 'WebSocket',
-          ['Connection'] = 'Upgrade',
-          [prefix .. 'WebSocket-Origin'] = origin,
-          [prefix .. 'WebSocket-Location'] = location
-        }, false)
+        p('REPLY', reply)
+        self:on('data', ondata)
+        local status, err = pcall(self.write, self, reply)
+        p('REPLYWRITTEN', status, err)
+        cb()
       end
-      self:on('data', ondata)
     end
     return 
   end
   self:on('data', wait_for_nonce)
-  wait_for_nonce(self.req.head or '')
-  return self:on('end', function()
-    return self:do_reasoned_close(1006, 'Connection closed')
-  end)
+  return wait_for_nonce(self.req.head or '')
 end
 return {
   handshake = handshake

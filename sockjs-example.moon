@@ -11,7 +11,7 @@ layers = () -> {
     prefix: '/echo'
     sockjs_url: '/public/sockjs.js'
     onconnection: (conn) ->
-      p('CONN') --, conn)
+      p('CONN', conn.sid)
       conn\on 'message', (m) -> conn\send m
   }))
 

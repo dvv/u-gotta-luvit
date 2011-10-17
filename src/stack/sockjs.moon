@@ -121,6 +121,7 @@ class Session extends EventEmitter
       options.onconnection self
 
   register: (recv) =>
+    p('REGISTER', @sid, not not @recv)
     if @recv
       recv\send_frame Transport.closing_frame(2010, 'Another connection still open')
       return
@@ -140,10 +141,11 @@ class Session extends EventEmitter
       @readyState = Transport.OPEN
       -- emit connection event
       set_timeout 0, @emit_connection_event
-    @flush()
+    @flush!
     return
 
   unregister: =>
+    p('UNREGISTER', @sid)
     @recv.session = nil
     @recv = nil
     if @to_tref
@@ -233,15 +235,32 @@ handle_balancer_cookie = () =>
 --
 
 Response = require 'response'
+
 Response.prototype.do_reasoned_close = (status, reason) =>
+  p('CLOSE', @session and @session.sid, status, reason)
+  @session\unregister! if @session
   @close()
-  if @session
-    @session\unregister status, reason
+  return
+
 Response.prototype.write_frame = (payload) =>
   @curr_size = @curr_size + #payload
-  @write payload
+  [==[
+  @write payload, (...) ->
+    p('WRITTEN', ...)
+    if @max_size and @curr_size >= @max_size
+      p('MAX SIZE EXCEEDED')
+      --set_timeout 0, () -> @do_reasoned_close()
+      @do_reasoned_close()
+  ]==]
+  status, err = pcall @write, self, payload
+  p('WRITTEN', status, err)
+  if not status
+    p('SIGPIPE', err)
   if @max_size and @curr_size >= @max_size
+    p('MAX SIZE EXCEEDED')
+    --set_timeout 0, () -> @do_reasoned_close()
     @do_reasoned_close()
+  return
 
 return (options = {}) ->
 
@@ -359,7 +378,13 @@ return (options = {}) ->
       @protocol = 'xhr'
       @curr_size, @max_size = 0, 1
       @send_frame = (payload) =>
+        p('SEND', @session and @session.sid, payload)
         @write_frame(payload .. '\n')
+      [==[
+      @on 'error', (code) ->
+        p('ERROR', code)
+        @close!
+      ]==]
       @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
       -- register session
       session = Session.get_or_create sid, options
@@ -400,14 +425,12 @@ return (options = {}) ->
       }, false
       -- N.B. these null-byte writes should be uncommented during automatic
       -- test by means of sockjs-protocol *.py script
-      --@write '\000'
       -- upgrade response to session handler
       @nodelay true
       @protocol = 'xhr-streaming'
       @curr_size, @max_size = 0, options.response_limit
       @send_frame = (payload) =>
         @write_frame(payload .. '\n')
-        --@write '\000'
       @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
       -- register session
       session = Session.get_or_create sid, options
@@ -532,8 +555,6 @@ return (options = {}) ->
     -- websockets
   
     ['(%w+) ${prefix}/[^./]+/[^./]+/websocket[/]?$' % options]: (nxt, verb) =>
-      -- TODO: inhibit so far
-      --return @send(404) if true
       if verb != 'GET'
         return @send 405
       if String.lower(@req.headers.upgrade or '') != 'websocket'
@@ -546,21 +567,24 @@ return (options = {}) ->
       location = (if origin and origin[1..5] == 'https' then 'wss' else 'ws')
       location = location .. '://' .. @req.headers.host .. @req.url
       ver = @req.headers['sec-websocket-version']
-      --shaker = if ver == '8' or ver == '7' then WebHandshake8 else WebHandshakeHixie76
-      shaker = require('lib/stack/sockjs-websocket').handshake
-      shaker self, origin, location
-      --shaker options, @req, self, (@req.head or ''), origin, location
       -- upgrade response to session handler
       @nodelay true
       @protocol = 'websocket'
       @curr_size, @max_size = 0, options.response_limit
       @send_frame = (payload) =>
-        @write_frame '\0000'
-        @write_frame payload
-        @write_frame '\ffff'
+        p('SEND', payload)
+        @write_frame '\000' .. payload .. '\255'
+        --@write_frame '\000'
+        --@write_frame payload
+        --@write_frame '\255'
       -- register session
       session = Session.get_or_create nil, options
-      session\register self
+      --session\register self
+      ---
+      ---
+      --shaker = if ver == '8' or ver == '7' then WebHandshake8 else WebHandshakeHixie76
+      shaker = require('lib/stack/sockjs-websocket').handshake
+      shaker self, origin, location, () -> session\register self
       return
   
   }
