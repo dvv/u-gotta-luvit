@@ -74,7 +74,7 @@ return (mount, root, options = {}) ->
   -- given file, serve contents, honor Range: header
   serve = (file, range, cache_it) =>
     -- adjust headers
-    headers = copy(file.headers)
+    headers = extend {}, file.headers
     headers['Date'] = date '%c'
     --
     size = file.size

@@ -533,7 +533,7 @@ return (options = {}) ->
 
   ['(%w+) ${prefix}/[^./]+/([^./]+)/websocket[/]?$' % options]: (nxt, verb, sid) =>
     -- TODO: inhibit so far
-    return @send 404 if true
+    return @send(404) if true
     if verb != 'GET'
       return @send 405
     if String.lower(@req.headers.upgrade or '') != 'websocket'
