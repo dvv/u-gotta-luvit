@@ -584,10 +584,7 @@ return function(options)
       self:send(200, 'c[3000,"Go away!"]\n')
       return 
     end,
-    ['(%w+) ${prefix}/[^./]+/([^./]+)/websocket[/]?$' % options] = function(self, nxt, verb, sid)
-      if true then
-        return self:send(404)
-      end
+    ['(%w+) ${prefix}/[^./]+/[^./]+/websocket[/]?$' % options] = function(self, nxt, verb)
       if verb ~= 'GET' then
         return self:send(405)
       end
@@ -607,8 +604,19 @@ return function(options)
       end)())
       location = location .. '://' .. self.req.headers.host .. self.req.url
       local ver = self.req.headers['sec-websocket-version']
-      local shaker = require('lib/stack/sockjs-websocket').WebHandshakeHixie76
-      return shaker(options, self.req, self, (head or ''), origin, location)
+      local shaker = require('lib/stack/sockjs-websocket').handshake
+      shaker(self, origin, location)
+      self:nodelay(true)
+      self.protocol = 'websocket'
+      self.curr_size, self.max_size = 0, options.response_limit
+      self.send_frame = function(self, payload)
+        self:write_frame('\0000')
+        self:write_frame(payload)
+        return self:write_frame('\ffff')
+      end
+      local session = Session.get_or_create(nil, options)
+      session:register(self)
+      return 
     end
   }
   return routes

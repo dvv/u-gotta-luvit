@@ -529,27 +529,40 @@ return (options = {}) ->
       @send 200, 'c[3000,"Go away!"]\n'
       return
 
-  -- websockets
-
-  ['(%w+) ${prefix}/[^./]+/([^./]+)/websocket[/]?$' % options]: (nxt, verb, sid) =>
-    -- TODO: inhibit so far
-    return @send(404) if true
-    if verb != 'GET'
-      return @send 405
-    if String.lower(@req.headers.upgrade or '') != 'websocket'
-      return @send 400, 'Can "Upgrade" only to "WebSocket".'
-    if String.lower(@req.headers.connection or '') != 'upgrade'
-      return @send 400, '"Connection" must be "Upgrade".'
-    origin = @req.headers.origin
-    --TODOif not verify_origin(origin, @options.origins)
-    --TODO  return @send 400, 'Unverified origin.'
-    location = (if origin and origin[1..5] == 'https' then 'wss' else 'ws')
-    location = location .. '://' .. @req.headers.host .. @req.url
-    ver = @req.headers['sec-websocket-version']
-    --shaker = if ver == '8' or ver == '7' then WebHandshake8 else WebHandshakeHixie76
-    shaker = require('lib/stack/sockjs-websocket').WebHandshakeHixie76
-    shaker options, @req, self, (head or ''), origin, location
-
+    -- websockets
+  
+    ['(%w+) ${prefix}/[^./]+/[^./]+/websocket[/]?$' % options]: (nxt, verb) =>
+      -- TODO: inhibit so far
+      --return @send(404) if true
+      if verb != 'GET'
+        return @send 405
+      if String.lower(@req.headers.upgrade or '') != 'websocket'
+        return @send 400, 'Can "Upgrade" only to "WebSocket".'
+      if String.lower(@req.headers.connection or '') != 'upgrade'
+        return @send 400, '"Connection" must be "Upgrade".'
+      origin = @req.headers.origin
+      --TODOif not verify_origin(origin, @options.origins)
+      --TODO  return @send 400, 'Unverified origin.'
+      location = (if origin and origin[1..5] == 'https' then 'wss' else 'ws')
+      location = location .. '://' .. @req.headers.host .. @req.url
+      ver = @req.headers['sec-websocket-version']
+      --shaker = if ver == '8' or ver == '7' then WebHandshake8 else WebHandshakeHixie76
+      shaker = require('lib/stack/sockjs-websocket').handshake
+      shaker self, origin, location
+      --shaker options, @req, self, (@req.head or ''), origin, location
+      -- upgrade response to session handler
+      @nodelay true
+      @protocol = 'websocket'
+      @curr_size, @max_size = 0, options.response_limit
+      @send_frame = (payload) =>
+        @write_frame '\0000'
+        @write_frame payload
+        @write_frame '\ffff'
+      -- register session
+      session = Session.get_or_create nil, options
+      session\register self
+      return
+  
   }
 
   routes
