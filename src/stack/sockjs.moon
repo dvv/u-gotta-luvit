@@ -242,6 +242,10 @@ Response.prototype.do_reasoned_close = (status, reason) =>
   @close()
   return
 
+Response.prototype.write1 = (data) =>
+  p('WRITE', data)
+  @write data
+
 Response.prototype.write_frame = (payload) =>
   @curr_size = @curr_size + #payload
   [==[
@@ -380,11 +384,10 @@ return (options = {}) ->
       @send_frame = (payload) =>
         p('SEND', @session and @session.sid, payload)
         @write_frame(payload .. '\n')
-      [==[
       @on 'error', (code) ->
         p('ERROR', code)
+        --error('ERROR', code)
         @close!
-      ]==]
       @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
       -- register session
       session = Session.get_or_create sid, options
@@ -485,14 +488,16 @@ return (options = {}) ->
 
     ['POST ${prefix}/chunking_test[/]?$' % options]: (nxt) =>
       handle_xhr_cors self
+      @nodelay!
       @send 200, nil, {
         ['Content-Type']: 'application/javascript; charset=UTF-8' -- for FF
       }, false
-      @write (String.rep ' ', 2048) .. 'h\n'
+      @write1 (String.rep ' ', 2048) .. 'h\n'
       for k, delay in ipairs {5, 25+5, 125+25+5, 625+125+25+5, 3125+625+125+25+5}
         set_timeout delay, () ->
-          pcall write, self, 'h\n'
-      --set_timeout 4000, () -> @close()
+          --pcall write, self, 'h\n'
+          @write1 'h\n'
+      ---set_timeout 5000, () -> @close()
       return
 
     ['OPTIONS ${prefix}/chunking_test[/]?$' % options]: (nxt) =>

@@ -268,6 +268,10 @@ Response.prototype.do_reasoned_close = function(self, status, reason)
   self:close()
   return 
 end
+Response.prototype.write1 = function(self, data)
+  p('WRITE', data)
+  return self:write(data)
+end
 Response.prototype.write_frame = function(self, payload)
   self.curr_size = self.curr_size + #payload
   local _ = [==[  @write payload, (...) ->
@@ -440,10 +444,10 @@ return function(options)
         p('SEND', self.session and self.session.sid, payload)
         return self:write_frame(payload .. '\n')
       end
-      local _ = [==[      @on 'error', (code) ->
+      self:on('error', function(code)
         p('ERROR', code)
-        @close!
-      ]==]
+        return self:close()
+      end)
       self:on('end', function()
         return self:do_reasoned_close(1006, 'Connection closed')
       end)
@@ -538,10 +542,11 @@ return function(options)
     end,
     ['POST ${prefix}/chunking_test[/]?$' % options] = function(self, nxt)
       handle_xhr_cors(self)
+      self:nodelay()
       self:send(200, nil, {
         ['Content-Type'] = 'application/javascript; charset=UTF-8'
       }, false)
-      self:write((String.rep(' ', 2048)) .. 'h\n')
+      self:write1((String.rep(' ', 2048)) .. 'h\n')
       for k, delay in ipairs({
         5,
         25 + 5,
@@ -550,7 +555,7 @@ return function(options)
         3125 + 625 + 125 + 25 + 5
       }) do
         set_timeout(delay, function()
-          return pcall(write, self, 'h\n')
+          return self:write1('h\n')
         end)
       end
       return 

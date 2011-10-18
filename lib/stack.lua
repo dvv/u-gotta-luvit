@@ -94,6 +94,7 @@ Response.prototype.send = function(self, code, data, headers, close)
   for k, v in pairs(headers or { }) do
     h[k] = v
   end
+  h['Transfer-Encoding'] = 'chunked'
   p('RESPONSE', self.req and self.req.url, code, data, h)
   self:write_head(code, h or { })
   local _ = [==[  if data

@@ -77,6 +77,8 @@ Response.prototype.send = (code, data, headers, close = true) =>
   h = @headers or {}
   for k, v in pairs(headers or {})
     h[k] = v
+  --FIXME: should be tunable
+  h['Transfer-Encoding'] = 'chunked'
   p('RESPONSE', @req and @req.url, code, data, h)
   @write_head code, h or {}
   [==[
