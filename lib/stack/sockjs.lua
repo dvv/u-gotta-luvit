@@ -282,7 +282,7 @@ local Response = require('response')
 Response.prototype.do_reasoned_close = function(self, status, reason)
   p('REASONED_CLOSE', self.session and self.session.sid, status, reason)
   if self.session then
-    self.session:unregister()
+    self.session:close(status, reason)
   end
   self:close()
   return 

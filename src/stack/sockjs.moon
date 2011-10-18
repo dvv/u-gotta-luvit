@@ -255,8 +255,8 @@ Response = require 'response'
 
 Response.prototype.do_reasoned_close = (status, reason) =>
   p('REASONED_CLOSE', @session and @session.sid, status, reason)
-  --@session\close(status, reason) if @session
-  @session\unregister() if @session
+  @session\close(status, reason) if @session
+  --@session\unregister() if @session
   @close()
   return
 
