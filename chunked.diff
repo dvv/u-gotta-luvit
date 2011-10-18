@@ -1,0 +1,60 @@
+diff --git a/lib/response.lua b/lib/response.lua
+index be32f3f..feab181 100644
+--- a/lib/response.lua
++++ b/lib/response.lua
+@@ -66,19 +66,52 @@ function Response.new(client)
+     prototype = Response.prototype
+   }
+   setmetatable(response, user_meta)
++  response.headers = {}
+   return response
+ end
+ 
+-function Response.prototype:write_head(code, headers, callback)
++function Response.prototype:set_header(name, value)
++  -- TODO: multiple values should glue
++  self.headers[name] = value
++end
+ 
++function Response.prototype:write_head(code, headers, callback)
+   local reason = status_codes_table[code]
+   if not reason then error("Invalue response code " .. tostring(code)) end
+   local head = "HTTP/1.1 " .. code .. " " .. reason .. "\r\n"
+-  for field, value in pairs(headers) do
++  if headers then
++    for k, v in pairs(headers) do
++      self.headers[k] = v
++    end
++  end
++  if not self.headers['Content-Length'] then
++    self.headers['Transfer-Encoding'] = 'chunked'
++  end
++  if self.headers['Transfer-Encoding'] == 'chunked' then
++    self.chunked = true
++  end
++  p('WRITE_HEAD', self.headers)
++  for field, value in pairs(self.headers) do
+     head = head .. field .. ": " .. value .. "\r\n"
+   end
+   head = head .. "\r\n"
+-  self:write(head, callback)
++  self.userdata.write(self, head, callback)
++end
++
++function Response.prototype:write(data, callback)
++  if self.chunked then
++    data = ('%x'):format(#data) .. '\r\n' .. data .. '\r\n'
++  end
++  p('WRITE', data)
++  self.userdata.write(self, data, callback)
++end
++
++function Response.prototype:close(callback)
++  if self.chunked then
++    self:write('')
++    p('WRITELAST')
++  end
++  self.userdata.close(self, callback)
+ end
+ 
+ return Response

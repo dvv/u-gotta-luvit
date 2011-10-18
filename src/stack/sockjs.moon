@@ -97,6 +97,8 @@ escape_for_eventsource = (str) ->
 --
 
 sessions = {} -- private table of registered sessions
+_G.s = () -> sessions
+_G.f = () -> sessions = {}
 
 class Session extends EventEmitter
 
@@ -114,8 +116,8 @@ class Session extends EventEmitter
     @send_buffer = {}
     @readyState = Transport.CONNECTING
     sessions[@sid] = self if @sid
-    @timeout_cb = () -> @ontimeout()
-    @to_tref = set_timeout @disconnect_delay, @timeout_cb
+    @to_tref = set_timeout @disconnect_delay, @ontimeout, self
+    @TO = 'TIMEOUT1'
     @emit_connection_event = ->
       @emit_connection_event = nil
       options.onconnection self
@@ -123,16 +125,22 @@ class Session extends EventEmitter
   register: (recv) =>
     p('REGISTER', @sid, not not @recv)
     if @recv
+      p('ALREADY REGISTERED!!!')
       recv\send_frame Transport.closing_frame(2010, 'Another connection still open')
       return
+    p('TO?', @TO)
     if @to_tref
       clear_timer @to_tref
       @to_tref = nil
+    p('STATE', @readyState)
     if @readyState == Transport.CLOSING
+      p('STATEISCLOSING', @close_frame)
       recv\send_frame @close_frame
-      @to_tref = set_timeout @disconnect_delay, @timeout_cb
+      @to_tref = set_timeout @disconnect_delay, @ontimeout, self
+      @TO = 'TIMEOUTINREGISTER1'
       return
     --
+    p('DOREGISTER', @readyState)
     @recv = recv
     @recv.session = self
     -- first, send the open frame
@@ -141,34 +149,43 @@ class Session extends EventEmitter
       @readyState = Transport.OPEN
       -- emit connection event
       set_timeout 0, @emit_connection_event
-    @flush!
+    p('TRYFLUSH')
+    @flush()
     return
 
   unregister: =>
-    p('UNREGISTER', @sid)
+    p('UNREGISTER', @sid, not not @recv)
     @recv.session = nil
     @recv = nil
     if @to_tref
       clear_timer @to_tref
-    @to_tref = set_timeout @disconnect_delay, @timeout_cb
+    @to_tref = set_timeout @disconnect_delay, @ontimeout, self
+    @TO = 'TIMEOUTINUNREGISTER'
     return
 
   flush: =>
+    p('INFLUSH', @send_buffer)
     if #@send_buffer > 0
       messages = @send_buffer
       @send_buffer = {}
       @recv\send_frame 'a' .. JSON.encode(messages)
     else
+      p('TOTREF?', @TO, @to_tref)
       if @to_tref
         clear_timer @to_tref
+        @to_tref = nil
       x = ->
+        p('INHEART', not not @recv)
         if @recv
           @to_tref = set_timeout @heartbeat_delay, x
+          @TO = 'TIMEOUTINHEARTX'
           @recv\send_frame 'h'
       @to_tref = set_timeout @heartbeat_delay, x
+      @TO = 'TIMEOUTINHEART0'
     return
 
   ontimeout: =>
+    p('TIMEDOUT', @sid, @recv)
     if @readyState != Transport.CONNECTING and @readyState != Transport.OPEN and @readyState != Transport.CLOSING
       error 'INVALID_STATE_ERR'
     if @recv
@@ -197,7 +214,7 @@ class Session extends EventEmitter
     @close_frame = Transport.closing_frame status, reason
     if @recv
       @recv\send_frame @close_frame
-      @unregister
+      @unregister()
     return
 
 --
@@ -237,32 +254,18 @@ handle_balancer_cookie = () =>
 Response = require 'response'
 
 Response.prototype.do_reasoned_close = (status, reason) =>
-  p('CLOSE', @session and @session.sid, status, reason)
-  @session\unregister! if @session
+  p('REASONED_CLOSE', @session and @session.sid, status, reason)
+  --@session\close(status, reason) if @session
+  @session\unregister() if @session
   @close()
   return
 
-Response.prototype.write1 = (data) =>
-  p('WRITE', data)
-  @write data
-
 Response.prototype.write_frame = (payload) =>
   @curr_size = @curr_size + #payload
-  [==[
-  @write payload, (...) ->
-    p('WRITTEN', ...)
-    if @max_size and @curr_size >= @max_size
-      p('MAX SIZE EXCEEDED')
-      --set_timeout 0, () -> @do_reasoned_close()
-      @do_reasoned_close()
-  ]==]
-  status, err = pcall @write, self, payload
-  p('WRITTEN', status, err)
-  if not status
-    p('SIGPIPE', err)
+  @write payload
   if @max_size and @curr_size >= @max_size
     p('MAX SIZE EXCEEDED')
-    --set_timeout 0, () -> @do_reasoned_close()
+    @orderly = true
     @do_reasoned_close()
   return
 
@@ -384,11 +387,25 @@ return (options = {}) ->
       @send_frame = (payload) =>
         p('SEND', @session and @session.sid, payload)
         @write_frame(payload .. '\n')
+      @on 'closed', () ->
+        p('CLOSEDEVENT')
       @on 'error', (code) ->
+        p()
+        p()
+
+        p()
         p('ERROR', code)
-        --error('ERROR', code)
-        @close!
-      @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
+        p()
+        p()
+        p()
+        @emit 'end'
+      --@foo = () -> @do_reasoned_close 1006, 'Connection closed'
+      --@once 'end', @foo
+      @once 'end', () ->
+        p('ONEND', @orderly)
+        if not @orderly
+          @do_reasoned_close 1006, 'Connection closed'
+        return
       -- register session
       session = Session.get_or_create sid, options
       session\register self
@@ -409,7 +426,7 @@ return (options = {}) ->
       @curr_size, @max_size = 0, 1
       @send_frame = (payload) =>
         @write_frame(callback .. '(' .. JSON.encode(payload) .. ');\r\n')
-      @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
+      @once 'end', () -> @do_reasoned_close 1006, 'Connection closed'
       -- register session
       session = Session.get_or_create sid, options
       session\register self
@@ -429,12 +446,11 @@ return (options = {}) ->
       -- N.B. these null-byte writes should be uncommented during automatic
       -- test by means of sockjs-protocol *.py script
       -- upgrade response to session handler
-      @nodelay true
       @protocol = 'xhr-streaming'
       @curr_size, @max_size = 0, options.response_limit
       @send_frame = (payload) =>
         @write_frame(payload .. '\n')
-      @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
+      @once 'end', () -> @do_reasoned_close 1006, 'Connection closed'
       -- register session
       session = Session.get_or_create sid, options
       session\register self
@@ -452,12 +468,11 @@ return (options = {}) ->
         ['Cache-Control']: 'no-store, no-cache, must-revalidate, max-age=0'
       }, false
       -- upgrade response to session handler
-      @nodelay true
       @protocol = 'htmlfile'
       @curr_size, @max_size = 0, options.response_limit
       @send_frame = (payload) =>
         @write_frame('<script>\np(' .. JSON.encode(payload) .. ');\n</script>\r\n')
-      @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
+      @once 'end', () -> @do_reasoned_close 1006, 'Connection closed'
       -- register session
       session = Session.get_or_create sid, options
       session\register self
@@ -473,12 +488,11 @@ return (options = {}) ->
         ['Cache-Control']: 'no-store, no-cache, must-revalidate, max-age=0'
       }, false
       -- upgrade response to session handler
-      @nodelay true
       @protocol = 'eventsource'
       @curr_size, @max_size = 0, options.response_limit
       @send_frame = (payload) =>
         @write_frame('data: ' .. escape_for_eventsource(payload) .. '\r\n\r\n')
-      @on 'end', () -> @do_reasoned_close 1006, 'Connection closed'
+      @once 'end', () -> @do_reasoned_close 1006, 'Connection closed'
       -- register session
       session = Session.get_or_create sid, options
       session\register self
@@ -488,16 +502,14 @@ return (options = {}) ->
 
     ['POST ${prefix}/chunking_test[/]?$' % options]: (nxt) =>
       handle_xhr_cors self
-      @nodelay!
       @send 200, nil, {
         ['Content-Type']: 'application/javascript; charset=UTF-8' -- for FF
       }, false
-      @write1 (String.rep ' ', 2048) .. 'h\n'
+      @write (String.rep ' ', 2048) .. 'h\n'
       for k, delay in ipairs {5, 25+5, 125+25+5, 625+125+25+5, 3125+625+125+25+5}
         set_timeout delay, () ->
           --pcall write, self, 'h\n'
-          @write1 'h\n'
-      ---set_timeout 5000, () -> @close()
+          @write 'h\n'
       return
 
     ['OPTIONS ${prefix}/chunking_test[/]?$' % options]: (nxt) =>

@@ -80,6 +80,12 @@ escape_for_eventsource = function(str)
   return str
 end
 local sessions = { }
+_G.s = function()
+  return sessions
+end
+_G.f = function()
+  sessions = { }
+end
 local Session
 Session = (function()
   local _parent_0 = EventEmitter
@@ -97,18 +103,24 @@ Session = (function()
     register = function(self, recv)
       p('REGISTER', self.sid, not not self.recv)
       if self.recv then
+        p('ALREADY REGISTERED!!!')
         recv:send_frame(Transport.closing_frame(2010, 'Another connection still open'))
         return 
       end
+      p('TO?', self.TO)
       if self.to_tref then
         clear_timer(self.to_tref)
         self.to_tref = nil
       end
+      p('STATE', self.readyState)
       if self.readyState == Transport.CLOSING then
+        p('STATEISCLOSING', self.close_frame)
         recv:send_frame(self.close_frame)
-        self.to_tref = set_timeout(self.disconnect_delay, self.timeout_cb)
+        self.to_tref = set_timeout(self.disconnect_delay, self.ontimeout, self)
+        self.TO = 'TIMEOUTINREGISTER1'
         return 
       end
+      p('DOREGISTER', self.readyState)
       self.recv = recv
       self.recv.session = self
       if self.readyState == Transport.CONNECTING then
@@ -116,40 +128,49 @@ Session = (function()
         self.readyState = Transport.OPEN
         set_timeout(0, self.emit_connection_event)
       end
+      p('TRYFLUSH')
       self:flush()
       return 
     end,
     unregister = function(self)
-      p('UNREGISTER', self.sid)
+      p('UNREGISTER', self.sid, not not self.recv)
       self.recv.session = nil
       self.recv = nil
       if self.to_tref then
         clear_timer(self.to_tref)
       end
-      self.to_tref = set_timeout(self.disconnect_delay, self.timeout_cb)
+      self.to_tref = set_timeout(self.disconnect_delay, self.ontimeout, self)
+      self.TO = 'TIMEOUTINUNREGISTER'
       return 
     end,
     flush = function(self)
+      p('INFLUSH', self.send_buffer)
       if #self.send_buffer > 0 then
         local messages = self.send_buffer
         self.send_buffer = { }
         self.recv:send_frame('a' .. JSON.encode(messages))
       else
+        p('TOTREF?', self.TO, self.to_tref)
         if self.to_tref then
           clear_timer(self.to_tref)
+          self.to_tref = nil
         end
         local x
         x = function()
+          p('INHEART', not not self.recv)
           if self.recv then
             self.to_tref = set_timeout(self.heartbeat_delay, x)
+            self.TO = 'TIMEOUTINHEARTX'
             return self.recv:send_frame('h')
           end
         end
         self.to_tref = set_timeout(self.heartbeat_delay, x)
+        self.TO = 'TIMEOUTINHEART0'
       end
       return 
     end,
     ontimeout = function(self)
+      p('TIMEDOUT', self.sid, self.recv)
       if self.readyState ~= Transport.CONNECTING and self.readyState ~= Transport.OPEN and self.readyState ~= Transport.CLOSING then
         error('INVALID_STATE_ERR')
       end
@@ -194,7 +215,7 @@ Session = (function()
       self.close_frame = Transport.closing_frame(status, reason)
       if self.recv then
         self.recv:send_frame(self.close_frame)
-        local _ = self.unregister
+        self:unregister()
       end
       return 
     end
@@ -214,10 +235,8 @@ Session = (function()
       if self.sid then
         sessions[self.sid] = self
       end
-      self.timeout_cb = function()
-        return self:ontimeout()
-      end
-      self.to_tref = set_timeout(self.disconnect_delay, self.timeout_cb)
+      self.to_tref = set_timeout(self.disconnect_delay, self.ontimeout, self)
+      self.TO = 'TIMEOUT1'
       self.emit_connection_event = function()
         self.emit_connection_event = nil
         return options.onconnection(self)
@@ -261,33 +280,19 @@ handle_balancer_cookie = function(self)
 end
 local Response = require('response')
 Response.prototype.do_reasoned_close = function(self, status, reason)
-  p('CLOSE', self.session and self.session.sid, status, reason)
+  p('REASONED_CLOSE', self.session and self.session.sid, status, reason)
   if self.session then
     self.session:unregister()
   end
   self:close()
   return 
 end
-Response.prototype.write1 = function(self, data)
-  p('WRITE', data)
-  return self:write(data)
-end
 Response.prototype.write_frame = function(self, payload)
   self.curr_size = self.curr_size + #payload
-  local _ = [==[  @write payload, (...) ->
-    p('WRITTEN', ...)
-    if @max_size and @curr_size >= @max_size
-      p('MAX SIZE EXCEEDED')
-      --set_timeout 0, () -> @do_reasoned_close()
-      @do_reasoned_close()
-  ]==]
-  local status, err = pcall(self.write, self, payload)
-  p('WRITTEN', status, err)
-  if not status then
-    p('SIGPIPE', err)
-  end
+  self:write(payload)
   if self.max_size and self.curr_size >= self.max_size then
     p('MAX SIZE EXCEEDED')
+    self.orderly = true
     self:do_reasoned_close()
   end
   return 
@@ -444,12 +449,25 @@ return function(options)
         p('SEND', self.session and self.session.sid, payload)
         return self:write_frame(payload .. '\n')
       end
-      self:on('error', function(code)
-        p('ERROR', code)
-        return self:close()
+      self:on('closed', function()
+        return p('CLOSEDEVENT')
       end)
-      self:on('end', function()
-        return self:do_reasoned_close(1006, 'Connection closed')
+      self:on('error', function(code)
+        p()
+        p()
+        p()
+        p('ERROR', code)
+        p()
+        p()
+        p()
+        return self:emit('end')
+      end)
+      self:once('end', function()
+        p('ONEND', self.orderly)
+        if not self.orderly then
+          self:do_reasoned_close(1006, 'Connection closed')
+        end
+        return 
       end)
       local session = Session.get_or_create(sid, options)
       session:register(self)
@@ -470,7 +488,7 @@ return function(options)
       self.send_frame = function(self, payload)
         return self:write_frame(callback .. '(' .. JSON.encode(payload) .. ');\r\n')
       end
-      self:on('end', function()
+      self:once('end', function()
         return self:do_reasoned_close(1006, 'Connection closed')
       end)
       local session = Session.get_or_create(sid, options)
@@ -484,13 +502,12 @@ return function(options)
       self:send(200, content, {
         ['Content-Type'] = 'application/javascript; charset=UTF-8'
       }, false)
-      self:nodelay(true)
       self.protocol = 'xhr-streaming'
       self.curr_size, self.max_size = 0, options.response_limit
       self.send_frame = function(self, payload)
         return self:write_frame(payload .. '\n')
       end
-      self:on('end', function()
+      self:once('end', function()
         return self:do_reasoned_close(1006, 'Connection closed')
       end)
       local session = Session.get_or_create(sid, options)
@@ -508,13 +525,12 @@ return function(options)
         ['Content-Type'] = 'text/html; charset=UTF-8',
         ['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
       }, false)
-      self:nodelay(true)
       self.protocol = 'htmlfile'
       self.curr_size, self.max_size = 0, options.response_limit
       self.send_frame = function(self, payload)
         return self:write_frame('<script>\np(' .. JSON.encode(payload) .. ');\n</script>\r\n')
       end
-      self:on('end', function()
+      self:once('end', function()
         return self:do_reasoned_close(1006, 'Connection closed')
       end)
       local session = Session.get_or_create(sid, options)
@@ -527,13 +543,12 @@ return function(options)
         ['Content-Type'] = 'text/event-stream; charset=UTF-8',
         ['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
       }, false)
-      self:nodelay(true)
       self.protocol = 'eventsource'
       self.curr_size, self.max_size = 0, options.response_limit
       self.send_frame = function(self, payload)
         return self:write_frame('data: ' .. escape_for_eventsource(payload) .. '\r\n\r\n')
       end
-      self:on('end', function()
+      self:once('end', function()
         return self:do_reasoned_close(1006, 'Connection closed')
       end)
       local session = Session.get_or_create(sid, options)
@@ -542,11 +557,10 @@ return function(options)
     end,
     ['POST ${prefix}/chunking_test[/]?$' % options] = function(self, nxt)
       handle_xhr_cors(self)
-      self:nodelay()
       self:send(200, nil, {
         ['Content-Type'] = 'application/javascript; charset=UTF-8'
       }, false)
-      self:write1((String.rep(' ', 2048)) .. 'h\n')
+      self:write((String.rep(' ', 2048)) .. 'h\n')
       for k, delay in ipairs({
         5,
         25 + 5,
@@ -555,7 +569,7 @@ return function(options)
         3125 + 625 + 125 + 25 + 5
       }) do
         set_timeout(delay, function()
-          return self:write1('h\n')
+          return self:write('h\n')
         end)
       end
       return 

@@ -24,11 +24,13 @@ class Stack
       handler = (req, res) ->
         fn = (err) ->
           if err
+            p('ERRINSTACK1', err)
             error_handler req, res, err
           else
             child req, res
         status, err = pcall(layer, req, res, fn)
-        error_handler req, res, err if err
+        p('ERRINSTACK2', err, status) if err
+        error_handler req, res, err if not status
     @handler = handler
 
   --
@@ -74,19 +76,23 @@ Response.prototype.safe_write = (chunk, cb = noop) =>
       cb err
 
 Response.prototype.send = (code, data, headers, close = true) =>
+  p('RESPONSE', @req and @req.url, code, data)
+  @write_head code, headers
+  @write data if data
+  @close() if close
+
+[==[
+Response.prototype.send = (code, data, headers, close = true) =>
   h = @headers or {}
   for k, v in pairs(headers or {})
     h[k] = v
   --FIXME: should be tunable
-  h['Transfer-Encoding'] = 'chunked'
+  if not h['Content-Length']
+    h['Transfer-Encoding'] = 'chunked'
+  if h['Transfer-Encoding'] == 'chunked'
+    @chunked = true
   p('RESPONSE', @req and @req.url, code, data, h)
   @write_head code, h or {}
-  [==[
-  if data
-    @safe_write data, () -> @close()
-  else
-    @close()
-  ]==]
   @write data if data
   @close() if close
 
@@ -95,6 +101,7 @@ Response.prototype.set_header = (name, value) =>
   @headers = {} if not @headers
   -- TODO: multiple values should glue
   @headers[name] = value
+]==]
 
 -- serve 500 error and reason
 Response.prototype.fail = (reason) =>
