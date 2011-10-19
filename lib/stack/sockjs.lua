@@ -616,11 +616,11 @@ return function(options)
       self:send(200)
       return 
     end,
-    ['POST /close[/]?'] = function(self, nxt)
-      self:send(200, 'c[3000,"Go away!"]\n')
+    ['GET /close/[^./]+/[^./]+/websocket[/]?'] = function(self, nxt)
+      self:send(101, 'c[3000,"Go away!"]\n')
       return 
     end,
-    ['(%w+) ${prefix}/[^./]+/[^./]+/websocket[/]?$' % options] = function(self, nxt, verb)
+    ['(%w+) /(%w+)/[^./]+/[^./]+/websocket[/]?$' % options] = function(self, nxt, verb, root)
       if verb ~= 'GET' then
         return self:send(405)
       end
@@ -643,14 +643,20 @@ return function(options)
       self:nodelay(true)
       self.protocol = 'websocket'
       self.curr_size, self.max_size = 0, options.response_limit
-      self.send_frame = function(self, payload)
-        p('SEND', payload)
-        return self:write_frame('\000' .. payload .. '\255')
-      end
       local session = Session.get_or_create(nil, options)
-      session:bind(self)
-      local shaker = require('lib/stack/sockjs-websocket').handshake
-      shaker(self, origin, location)
+      local WebSocket = require('lib/stack/sockjs-websocket')
+      local shaker
+      if ver == '8' or ver == '7' then
+        shaker = WebSocket.WebHandshake8
+      else
+        shaker = WebSocket.WebHandshakeHixie76
+      end
+      shaker(self, origin, location, function()
+        session:bind(self)
+        if root == 'close' then
+          return session:close(3000, 'Go away!')
+        end
+      end)
       return 
     end
   }

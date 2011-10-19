@@ -1,0 +1,6 @@
+#!/bin/sh
+
+while true; do
+  ./venv/bin/python sockjs-protocol-0.0.4-incomplete.py -v WebsocketHixie76 2>>2
+  sleep 2
+done

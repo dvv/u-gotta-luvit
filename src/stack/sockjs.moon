@@ -567,13 +567,15 @@ return (options = {}) ->
 
     -- close request
 
-    ['POST /close[/]?']: (nxt) =>
-      @send 200, 'c[3000,"Go away!"]\n'
+    ['GET /close/[^./]+/[^./]+/websocket[/]?']: (nxt) =>
+      @send 101, 'c[3000,"Go away!"]\n'
       return
 
     -- websockets
   
-    ['(%w+) ${prefix}/[^./]+/[^./]+/websocket[/]?$' % options]: (nxt, verb) =>
+    -- TODO: localize handler, reuse in two patterns
+    --['(%w+) ${prefix}/[^./]+/[^./]+/websocket[/]?$' % options]: (nxt, verb) =>
+    ['(%w+) /(%w+)/[^./]+/[^./]+/websocket[/]?$' % options]: (nxt, verb, root) =>
       if verb != 'GET'
         return @send 405
       if String.lower(@req.headers.upgrade or '') != 'websocket'
@@ -590,20 +592,14 @@ return (options = {}) ->
       @nodelay true
       @protocol = 'websocket'
       @curr_size, @max_size = 0, options.response_limit
-      @send_frame = (payload) =>
-        p('SEND', payload)
-        @write_frame '\000' .. payload .. '\255'
-        --@write_frame '\000'
-        --@write_frame payload
-        --@write_frame '\255'
       -- register session
       session = Session.get_or_create nil, options
-      session\bind self
-      ---
-      ---
-      --shaker = if ver == '8' or ver == '7' then WebHandshake8 else WebHandshakeHixie76
-      shaker = require('lib/stack/sockjs-websocket').handshake
-      shaker self, origin, location --, () -> session\bind self
+      WebSocket = require('lib/stack/sockjs-websocket')
+      shaker = if ver == '8' or ver == '7' then WebSocket.WebHandshake8 else WebSocket.WebHandshakeHixie76
+      shaker self, origin, location, () ->
+        session\bind self
+        if root == 'close'
+          session\close 3000, 'Go away!'
       return
   
   }

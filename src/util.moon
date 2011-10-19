@@ -7,14 +7,16 @@
 export String
 String = require 'string'
 
+import sub, match, gsub, gmatch, byte, char, format from String
+
 -- interpolation
 String.interpolate = (data) =>
   return self if not data
   if type(data) == 'table'
-    return String.format(self, unpack(b)) if data[1]
-    return String.gsub self, '($%b{})', (w) ->
-      var = String.sub w, 3, -2
-      n, def = String.match var, '([^|]-)|(.*)'
+    return format(self, unpack(b)) if data[1]
+    return gsub self, '($%b{})', (w) ->
+      var = sub w, 3, -2
+      n, def = match var, '([^|]-)|(.*)'
       var = n if n
       s = type(data[var]) == 'function' and data[var]() or data[var] or def or w
       s = String.escape s
@@ -25,38 +27,60 @@ String.interpolate = (data) =>
 getmetatable('').__mod = String.interpolate
 
 String.tohex = (str) ->
-  (String.gsub str, '(.)', (c) -> String.format('%02x', String.byte(c)))
+  (gsub str, '(.)', (c) -> format('%02x', byte(c)))
 
 String.fromhex = (str) ->
-  (String.gsub str, '(%x%x)', (h) -> String.format('%c', tonumber(h,16)))
+  (gsub str, '(%x%x)', (h) ->
+    n = tonumber h, 16
+    if n != 0 then format('%c', n) else '\000')
+
+--
+-- base64 encoding
+-- Thanks: http://lua-users.org/wiki/BaseSixtyFour
+--
+
+-- character table string
+base64_table = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+String.base64 = (data) ->
+  ((gsub(data, '.', (x) ->
+    r, b = '', byte(x)
+    for i = 8, 1, -1
+      r = r .. (b%2^i - b%2^(i - 1) > 0 and '1' or '0')
+    r) .. '0000')\gsub('%d%d%d?%d?%d?%d?', (x) ->
+    return '' if #x < 6
+    c = 0
+    for i = 1, 6
+      c = c + (sub(x, i, i) == '1' and 2^(6 - i) or 0)
+    sub(base64_table, c + 1, c + 1)) .. ({'', '==', '='})[#data % 3 + 1])
 
 String.escape = (str) ->
   -- TODO: escape HTML entities
   --return self:gsub('&%w+;', '&amp;'):gsub('<', '&lt;'):gsub('>', '&gt;'):gsub('"', '&quot;')
   -- TODO: escape &
-  String.gsub(str, '<', '&lt;')\gsub('>', '&gt;')\gsub('"', '&quot;')
+  gsub(str, '<', '&lt;')\gsub('>', '&gt;')\gsub('"', '&quot;')
 
 String.unescape = (str) ->
   -- TODO: unescape HTML entities
   str
 
 String.url_decode = (str) ->
-  str = String.gsub str, '+', ' '
-  str = String.gsub str, '%%(%x%x)', (h) -> String.char tonumber(h,16)
-  str = String.gsub str, '\r\n', '\n'
+  str = gsub str, '+', ' '
+  str = gsub str, '%%(%x%x)', (h) -> char tonumber(h,16)
+  str = gsub str, '\r\n', '\n'
   str
 
 String.url_encode = (str) ->
   if str
-    str = String.gsub str, '\n', '\r\n'
-    str = String.gsub str, '([^%w ])', (c) -> String.format '%%%02X', String.byte(c)
-    str = String.gsub str, ' ', '+'
+    str = gsub str, '\n', '\r\n'
+    str = gsub str, '([^%w ])', (c) -> format '%%%02X', byte(c)
+    str = gsub str, ' ', '+'
   str
 
 String.parse_query = (str) ->
   allvars = {}
-  for pair in String.gmatch tostring(str), '[^&]+'
-      key, value = String.match pair, '([^=]*)=(.*)'
+  for pair in gmatch tostring(str), '[^&]+'
+      key, value = match pair, '([^=]*)=(.*)'
       if key
           allvars[key] = String.url_decode value
   allvars

@@ -11,7 +11,7 @@ build/luvit/build/luvit: build/luvit
 
 build/luvit:
 	mkdir -p build
-	git clone http://github.com/creationix/luvit.git build/luvit
+	git clone http://github.com/dvv/luvit.git build/luvit
 	#( cd build/luvit ; patch -Np1 < ../../nodelay.diff )
 
 json: build/lua-cjson/cjson.so
