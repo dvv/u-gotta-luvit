@@ -75,6 +75,10 @@ Response.prototype.safe_write = (chunk, cb = noop) =>
       p('WRITE FAILED', err)
       cb err
 
+Response.prototype.set_chunked = () =>
+  @set_header 'Transfer-Encoding', 'chunked'
+  @chunked = true
+
 Response.prototype.send = (code, data, headers, close = true) =>
   p('RESPONSE', @req and @req.url, code, data)
   @write_head code, headers

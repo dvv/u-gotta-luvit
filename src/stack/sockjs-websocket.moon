@@ -30,7 +30,7 @@ validate_crypto = (req_headers, nonce) ->
   md5\final()
 
 handshake = (origin, location, cb) =>
-  p('SHAKE', self, origin, location, @req.head)
+  p('SHAKE', origin, location, @req.head)
   @sec = @req.headers['sec-websocket-key1']
   wsp = @sec and @req.headers['sec-websocket-protocol']
   prefix = @sec and 'Sec-' or ''
@@ -38,18 +38,15 @@ handshake = (origin, location, cb) =>
     'HTTP/1.1 101 WebSocket Protocol Handshake'
     'Upgrade: WebSocket'
     'Connection: Upgrade'
+    --'Transfer-Encoding: chunked'
     prefix .. 'WebSocket-Origin: ' .. origin
     prefix .. 'WebSocket-Location: ' .. location
   }
   if wsp
     Table.insert blob, ('Sec-WebSocket-Protocol: ' .. @req.headers['sec-websocket-protocol'].split('[^,]*'))
 
-  @on 'end', () ->
-    p('ENDED????')
-    --@do_reasoned_close 1006, 'Connection closed'
-  p('P1')
   @write(Table.concat(blob, '\r\n') .. '\r\n\r\n')
-  p('P2')
+  --@set_chunked()
   data = ''
   -- parse incoming data
   ondata = (chunk) ->
@@ -93,7 +90,7 @@ handshake = (origin, location, cb) =>
         @on 'data', ondata
         status, err = pcall @write, self, reply
         p('REPLYWRITTEN', status, err)
-        cb!
+        cb() if cb
     return
   @on 'data', wait_for_nonce
   wait_for_nonce(@req.head or '')

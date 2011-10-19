@@ -90,6 +90,10 @@ Response.prototype.safe_write = function(self, chunk, cb)
     end
   end)
 end
+Response.prototype.set_chunked = function(self)
+  self:set_header('Transfer-Encoding', 'chunked')
+  self.chunked = true
+end
 Response.prototype.send = function(self, code, data, headers, close)
   if close == nil then
     close = true

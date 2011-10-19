@@ -70,7 +70,7 @@ String.parse_query = (str) ->
 
 _G.Table = require 'table'
 
-_G.d = (...) -> if env.DEBUG then p(...)
+_G.d = (...) -> if process.env.DEBUG then p(...)
 
 -- is object an array
 _G.is_array = (obj) -> type(obj) == 'table' and Table.maxn(obj) > 0

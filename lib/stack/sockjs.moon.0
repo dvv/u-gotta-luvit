@@ -15,9 +15,6 @@ do
   time = _table_0.time
 end
 local Math = require('math')
-local _ = [==[BaseUrlGreeting ChunkingTest IframePage WebsocketHttpErrors JsonPolling XhrPolling EventSource HtmlFile XhrStreaming
-Protocol SessionURLs
-]==]
 local iframe_template = [[<!DOCTYPE html>
 <html>
 <head>
@@ -103,55 +100,40 @@ Session = (function()
       end
       return session
     end,
-    bind = function(self, recv)
-      p('BIND', self.sid, self.id)
+    register = function(self, recv)
+      p('REGISTER', self.sid, not not self.recv)
       if self.recv then
         p('ALREADY REGISTERED!!!')
         recv:send_frame(Transport.closing_frame(2010, 'Another connection still open'))
         return 
       end
+      p('STATE', self.readyState)
       if self.readyState == Transport.CLOSING then
         p('STATEISCLOSING', self.close_frame)
         recv:send_frame(self.close_frame)
-        if self.to_tref then
-          clear_timer(self.to_tref)
-        end
         self.to_tref = set_timeout(self.disconnect_delay, self.ontimeout, self)
         self.TO = 'TIMEOUTINREGISTER1'
         return 
       end
+      p('TO?', self.TO)
+      if self.to_tref then
+        clear_timer(self.to_tref)
+        self.to_tref = nil
+      end
       p('DOREGISTER', self.readyState)
       self.recv = recv
       self.recv.session = self
-      self.recv:once('closed', function()
-        p('CLOSEDEVENT')
-        return self:unbind()
-      end)
-      self.recv:once('end', function()
-        p('END')
-        return self:unbind()
-      end)
-      self.recv:once('error', function(err)
-        p('ERROR', err)
-        return self.recv:close()
-      end)
       if self.readyState == Transport.CONNECTING then
         self.recv:send_frame('o')
         self.readyState = Transport.OPEN
         set_timeout(0, self.emit_connection_event)
       end
-      if self.to_tref then
-        clear_timer(self.to_tref)
-        self.TO = 'CLEAREDINREGISTER:' .. self.TO
-        self.to_tref = nil
-      end
-      if self.recv then
-        self:flush()
-      end
+      p('TRYFLUSH')
+      self:flush()
       return 
     end,
-    unbind = function(self)
-      p('UNREGISTER', self.sid, self.id, not not self.recv)
+    unregister = function(self)
+      p('UNREGISTER', self.sid, not not self.recv)
       if self.recv then
         self.recv.session = nil
         self.recv = nil
@@ -177,7 +159,7 @@ Session = (function()
       self.close_frame = Transport.closing_frame(status, reason)
       if self.recv then
         self.recv:send_frame(self.close_frame)
-        self:unbind()
+        self:unregister()
       end
       return 
     end,
@@ -225,21 +207,24 @@ Session = (function()
         self.recv:send_frame('a' .. JSON.encode(messages))
       else
         p('TOTREF?', self.TO, self.to_tref)
-        _ = [==[      if @to_tref
-        clear_timer @to_tref
-        @to_tref = nil
-      heart = ->
-        p('INHEART', not not @recv)
-        if @recv
-          @recv\send_frame 'h'
-          @to_tref = set_timeout @heartbeat_delay, heart
-          @TO = 'TIMEOUTINHEARTX'
-        else
-          @to_tref = nil
-          @TO = 'TIMEOUTINHEARTDOWNED'
-      @to_tref = set_timeout @heartbeat_delay, heart
-      @TO = 'TIMEOUTINHEART0'
-      ]==]
+        if self.to_tref then
+          clear_timer(self.to_tref)
+          self.to_tref = nil
+        end
+        local heart
+        heart = function()
+          p('INHEART', not not self.recv)
+          if self.recv then
+            self.recv:send_frame('h')
+            self.to_tref = set_timeout(self.heartbeat_delay, heart)
+            self.TO = 'TIMEOUTINHEARTX'
+          else
+            self.to_tref = nil
+            self.TO = 'TIMEOUTINHEARTDOWNED'
+          end
+        end
+        self.to_tref = set_timeout(self.heartbeat_delay, heart)
+        self.TO = 'TIMEOUTINHEART0'
       end
       return 
     end
@@ -306,7 +291,7 @@ local Response = require('response')
 Response.prototype.do_reasoned_close = function(self, status, reason)
   p('REASONED_CLOSE', self.session and self.session.sid, status, reason)
   if self.session then
-    self.session:unbind()
+    self.session:unregister()
   end
   self:close()
   return 
@@ -316,7 +301,8 @@ Response.prototype.write_frame = function(self, payload)
   self:write(payload)
   if self.max_size and self.curr_size >= self.max_size then
     p('MAX SIZE EXCEEDED')
-    self:close()
+    self.orderly = true
+    self:do_reasoned_close()
   end
   return 
 end
@@ -354,27 +340,21 @@ return function(options)
         p('SEND', self.session and self.session.sid, payload)
         return self:write_frame(payload .. '\n')
       end
+      self:on('closed', function()
+        p('CLOSEDEVENT')
+        return self:do_reasoned_close()
+      end)
+      self:on('error', function(code)
+        p('ERROR', code)
+        return self:emit('end')
+      end)
+      self:once('end', function()
+        p('ONEND', self.orderly)
+        self:do_reasoned_close(1006, 'Connection closed')
+        return 
+      end)
       local session = Session.get_or_create(sid, options)
-      session:bind(self)
-      return 
-    end,
-    ['GET ${prefix}/[^./]+/([^./]+)/jsonp[/]?$' % options] = function(self, nxt, sid)
-      handle_balancer_cookie(self)
-      local callback = self.req.uri.query.c or self.req.uri.query.callback
-      if not callback then
-        return self:fail('"callback" parameter required')
-      end
-      self:send(200, nil, {
-        ['Content-Type'] = 'application/javascript; charset=UTF-8',
-        ['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-      }, false)
-      self.protocol = 'jsonp'
-      self.curr_size, self.max_size = 0, 1
-      self.send_frame = function(self, payload)
-        return self:write_frame(callback .. '(' .. JSON.encode(payload) .. ');\r\n')
-      end
-      local session = Session.get_or_create(sid, options)
-      session:bind(self)
+      session:register(self)
       return 
     end,
     ['POST ${prefix}/[^./]+/([^./]+)/xhr_send[/]?$' % options] = function(self, nxt, sid)
@@ -495,10 +475,31 @@ return function(options)
       end)
       return 
     end,
+    ['GET ${prefix}/[^./]+/([^./]+)/jsonp[/]?$' % options] = function(self, nxt, sid)
+      handle_balancer_cookie(self)
+      local callback = self.req.uri.query.c or self.req.uri.query.callback
+      if not callback then
+        return self:fail('"callback" parameter required')
+      end
+      self:send(200, nil, {
+        ['Content-Type'] = 'application/javascript; charset=UTF-8',
+        ['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+      }, false)
+      self.protocol = 'jsonp'
+      self.curr_size, self.max_size = 0, 1
+      self.send_frame = function(self, payload)
+        return self:write_frame(callback .. '(' .. JSON.encode(payload) .. ');\r\n')
+      end
+      self:once('end', function()
+        return self:do_reasoned_close(1006, 'Connection closed')
+      end)
+      local session = Session.get_or_create(sid, options)
+      session:register(self)
+      return 
+    end,
     ['POST ${prefix}/[^./]+/([^./]+)/xhr_streaming[/]?$' % options] = function(self, nxt, sid)
       handle_xhr_cors(self)
       handle_balancer_cookie(self)
-      self:set_chunked()
       local content = String.rep('h', 2048) .. '\n'
       self:send(200, content, {
         ['Content-Type'] = 'application/javascript; charset=UTF-8'
@@ -508,13 +509,15 @@ return function(options)
       self.send_frame = function(self, payload)
         return self:write_frame(payload .. '\n')
       end
+      self:once('end', function()
+        return self:do_reasoned_close(1006, 'Connection closed')
+      end)
       local session = Session.get_or_create(sid, options)
-      session:bind(self)
+      session:register(self)
       return 
     end,
     ['GET ${prefix}/[^./]+/([^./]+)/htmlfile[/]?$' % options] = function(self, nxt, sid)
       handle_balancer_cookie(self)
-      self:set_chunked()
       local callback = self.req.uri.query.c or self.req.uri.query.callback
       if not callback then
         return self:fail('"callback" parameter required')
@@ -529,13 +532,15 @@ return function(options)
       self.send_frame = function(self, payload)
         return self:write_frame('<script>\np(' .. JSON.encode(payload) .. ');\n</script>\r\n')
       end
+      self:once('end', function()
+        return self:do_reasoned_close(1006, 'Connection closed')
+      end)
       local session = Session.get_or_create(sid, options)
-      session:bind(self)
+      session:register(self)
       return 
     end,
     ['GET ${prefix}/[^./]+/([^./]+)/eventsource[/]?$' % options] = function(self, nxt, sid)
       handle_balancer_cookie(self)
-      self:set_chunked()
       self:send(200, '\r\n', {
         ['Content-Type'] = 'text/event-stream; charset=UTF-8',
         ['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
@@ -545,13 +550,15 @@ return function(options)
       self.send_frame = function(self, payload)
         return self:write_frame('data: ' .. escape_for_eventsource(payload) .. '\r\n\r\n')
       end
+      self:once('end', function()
+        return self:do_reasoned_close(1006, 'Connection closed')
+      end)
       local session = Session.get_or_create(sid, options)
-      session:bind(self)
+      session:register(self)
       return 
     end,
     ['POST ${prefix}/chunking_test[/]?$' % options] = function(self, nxt)
       handle_xhr_cors(self)
-      self:set_chunked()
       self:send(200, nil, {
         ['Content-Type'] = 'application/javascript; charset=UTF-8'
       }, false)
@@ -648,9 +655,10 @@ return function(options)
         return self:write_frame('\000' .. payload .. '\255')
       end
       local session = Session.get_or_create(nil, options)
-      session:bind(self)
       local shaker = require('lib/stack/sockjs-websocket').handshake
-      shaker(self, origin, location)
+      shaker(self, origin, location, function()
+        return session:register(self)
+      end)
       return 
     end
   }

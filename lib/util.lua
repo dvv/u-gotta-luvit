@@ -68,7 +68,7 @@ String.parse_query = function(str)
 end
 _G.Table = require('table')
 _G.d = function(...)
-  if env.DEBUG then
+  if process.env.DEBUG then
     return p(...)
   end
 end

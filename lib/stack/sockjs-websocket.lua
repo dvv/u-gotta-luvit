@@ -41,7 +41,7 @@ validate_crypto = function(req_headers, nonce)
 end
 local handshake
 handshake = function(self, origin, location, cb)
-  p('SHAKE', self, origin, location, self.req.head)
+  p('SHAKE', origin, location, self.req.head)
   self.sec = self.req.headers['sec-websocket-key1']
   local wsp = self.sec and self.req.headers['sec-websocket-protocol']
   local prefix = self.sec and 'Sec-' or ''
@@ -55,12 +55,7 @@ handshake = function(self, origin, location, cb)
   if wsp then
     Table.insert(blob, ('Sec-WebSocket-Protocol: ' .. self.req.headers['sec-websocket-protocol'].split('[^,]*')))
   end
-  self:on('end', function()
-    return p('ENDED????')
-  end)
-  p('P1')
   self:write(Table.concat(blob, '\r\n') .. '\r\n\r\n')
-  p('P2')
   local data = ''
   local ondata
   ondata = function(chunk)
@@ -118,7 +113,9 @@ handshake = function(self, origin, location, cb)
         self:on('data', ondata)
         local status, err = pcall(self.write, self, reply)
         p('REPLYWRITTEN', status, err)
-        cb()
+        if cb then
+          cb()
+        end
       end
     end
     return 

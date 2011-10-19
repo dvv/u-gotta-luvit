@@ -10,10 +10,7 @@ import date, time from require 'os'
 Math = require 'math'
 
 -- sockjs-protocol tests
-[==[
-BaseUrlGreeting ChunkingTest IframePage WebsocketHttpErrors JsonPolling XhrPolling EventSource HtmlFile XhrStreaming
-Protocol SessionURLs
-]==]
+-- BaseUrlGreeting IframePage Protocol SessionURLs ChunkingTest XhrPolling JsonPolling EventSource HtmlFile XhrStreaming
 
 --
 -- helper iframe content, to allow cross-domain connections
@@ -125,51 +122,42 @@ class Session extends EventEmitter
       @emit_connection_event = nil
       options.onconnection self
 
-  bind: (recv) =>
-    p('BIND', @sid, @id)
+  register: (recv) =>
+    p('REGISTER', @sid, not not @recv)
     if @recv
       p('ALREADY REGISTERED!!!')
       recv\send_frame Transport.closing_frame(2010, 'Another connection still open')
       return
+    p('STATE', @readyState)
     if @readyState == Transport.CLOSING
       p('STATEISCLOSING', @close_frame)
       recv\send_frame @close_frame
-      if @to_tref
-        clear_timer @to_tref
       @to_tref = set_timeout @disconnect_delay, @ontimeout, self
       @TO = 'TIMEOUTINREGISTER1'
       return
+    p('TO?', @TO)
+    if @to_tref
+      clear_timer @to_tref
+      @to_tref = nil
     --
     p('DOREGISTER', @readyState)
     @recv = recv
     @recv.session = self
-    @recv\once 'closed', () ->
-      p('CLOSEDEVENT')
-      @unbind()
-    @recv\once 'end', () ->
-      p('END')
-      @unbind()
-    @recv\once 'error', (err) ->
-      p('ERROR', err)
-      @recv\close()
     -- send the open frame
     if @readyState == Transport.CONNECTING
       @recv\send_frame 'o'
       @readyState = Transport.OPEN
       -- emit connection event
       set_timeout 0, @emit_connection_event
-    if @to_tref
-      clear_timer @to_tref
-      @TO = 'CLEAREDINREGISTER:' .. @TO
-      @to_tref = nil
-    @flush() if @recv
+    p('TRYFLUSH')
+    @flush()
     return
 
-  unbind: =>
-    p('UNREGISTER', @sid, @id, not not @recv)
+  unregister: =>
+    p('UNREGISTER', @sid, not not @recv)
     if @recv
-      @recv.session = nil
-      @recv = nil
+        @recv.session = nil
+        @recv = nil
     if @to_tref
       clear_timer @to_tref
     @to_tref = set_timeout @disconnect_delay, @ontimeout, self
@@ -182,7 +170,7 @@ class Session extends EventEmitter
     @close_frame = Transport.closing_frame status, reason
     if @recv
       @recv\send_frame @close_frame
-      @unbind()
+      @unregister()
     return
 
   ontimeout: =>
@@ -220,7 +208,6 @@ class Session extends EventEmitter
       @recv\send_frame 'a' .. JSON.encode(messages)
     else
       p('TOTREF?', @TO, @to_tref)
-      [==[
       if @to_tref
         clear_timer @to_tref
         @to_tref = nil
@@ -235,7 +222,6 @@ class Session extends EventEmitter
           @TO = 'TIMEOUTINHEARTDOWNED'
       @to_tref = set_timeout @heartbeat_delay, heart
       @TO = 'TIMEOUTINHEART0'
-      ]==]
     return
 
 --
@@ -276,7 +262,8 @@ Response = require 'response'
 
 Response.prototype.do_reasoned_close = (status, reason) =>
   p('REASONED_CLOSE', @session and @session.sid, status, reason)
-  @session\unbind() if @session
+  --@session\close(status, reason) if @session
+  @session\unregister() if @session
   @close()
   return
 
@@ -285,8 +272,8 @@ Response.prototype.write_frame = (payload) =>
   @write payload
   if @max_size and @curr_size >= @max_size
     p('MAX SIZE EXCEEDED')
-    --set_timeout 100, () -> @close()
-    @close()
+    @orderly = true
+    @do_reasoned_close()
   return
 
 return (options = {}) ->
@@ -312,7 +299,6 @@ return (options = {}) ->
     ['POST ${prefix}/[^./]+/([^./]+)/xhr[/]?$' % options]: (nxt, sid) =>
       handle_xhr_cors self
       handle_balancer_cookie self
-      --@set_chunked()
       @send 200, nil, {
         ['Content-Type']: 'application/javascript; charset=UTF-8'
       }, false
@@ -322,29 +308,23 @@ return (options = {}) ->
       @send_frame = (payload) =>
         p('SEND', @session and @session.sid, payload)
         @write_frame(payload .. '\n')
+      @on 'closed', () ->
+        p('CLOSEDEVENT')
+        @do_reasoned_close()
+      @on 'error', (code) ->
+        p('ERROR', code)
+        @emit 'end'
+      --@foo = () -> @do_reasoned_close 1006, 'Connection closed'
+      --@once 'end', @foo
+      @once 'end', () ->
+        p('ONEND', @orderly)
+        --if not @orderly
+        --  @do_reasoned_close 1006, 'Connection closed'
+        @do_reasoned_close 1006, 'Connection closed'
+        return
       -- register session
       session = Session.get_or_create sid, options
-      session\bind self
-      return
-
-    -- jsonp (polling)
-
-    ['GET ${prefix}/[^./]+/([^./]+)/jsonp[/]?$' % options]: (nxt, sid) =>
-      handle_balancer_cookie self
-      callback = @req.uri.query.c or @req.uri.query.callback
-      return @fail '"callback" parameter required' if not callback
-      @send 200, nil, {
-        ['Content-Type']: 'application/javascript; charset=UTF-8'
-        ['Cache-Control']: 'no-store, no-cache, must-revalidate, max-age=0'
-      }, false
-      -- upgrade response to session handler
-      @protocol = 'jsonp'
-      @curr_size, @max_size = 0, 1
-      @send_frame = (payload) =>
-        @write_frame(callback .. '(' .. JSON.encode(payload) .. ');\r\n')
-      -- register session
-      session = Session.get_or_create sid, options
-      session\bind self
+      session\register self
       return
 
     -- xhr_send
@@ -433,12 +413,32 @@ return (options = {}) ->
         return
       return
 
+    -- jsonp (polling)
+
+    ['GET ${prefix}/[^./]+/([^./]+)/jsonp[/]?$' % options]: (nxt, sid) =>
+      handle_balancer_cookie self
+      callback = @req.uri.query.c or @req.uri.query.callback
+      return @fail '"callback" parameter required' if not callback
+      @send 200, nil, {
+        ['Content-Type']: 'application/javascript; charset=UTF-8'
+        ['Cache-Control']: 'no-store, no-cache, must-revalidate, max-age=0'
+      }, false
+      -- upgrade response to session handler
+      @protocol = 'jsonp'
+      @curr_size, @max_size = 0, 1
+      @send_frame = (payload) =>
+        @write_frame(callback .. '(' .. JSON.encode(payload) .. ');\r\n')
+      @once 'end', () -> @do_reasoned_close 1006, 'Connection closed'
+      -- register session
+      session = Session.get_or_create sid, options
+      session\register self
+      return
+
     -- xhr_streaming
 
     ['POST ${prefix}/[^./]+/([^./]+)/xhr_streaming[/]?$' % options]: (nxt, sid) =>
       handle_xhr_cors self
       handle_balancer_cookie self
-      @set_chunked()
       -- IE requires 2KB prefix:
       -- http://blogs.msdn.com/b/ieinternals/archive/2010/04/06/comet-streaming-in-internet-explorer-with-xmlhttprequest-and-xdomainrequest.aspx
       content = String.rep('h', 2048) .. '\n'
@@ -452,16 +452,16 @@ return (options = {}) ->
       @curr_size, @max_size = 0, options.response_limit
       @send_frame = (payload) =>
         @write_frame(payload .. '\n')
+      @once 'end', () -> @do_reasoned_close 1006, 'Connection closed'
       -- register session
       session = Session.get_or_create sid, options
-      session\bind self
+      session\register self
       return
 
     -- htmlfile
 
     ['GET ${prefix}/[^./]+/([^./]+)/htmlfile[/]?$' % options]: (nxt, sid) =>
       handle_balancer_cookie self
-      @set_chunked()
       callback = @req.uri.query.c or @req.uri.query.callback
       return @fail '"callback" parameter required' if not callback
       content = String.gsub htmlfile_template, '{{ callback }}', callback
@@ -474,16 +474,16 @@ return (options = {}) ->
       @curr_size, @max_size = 0, options.response_limit
       @send_frame = (payload) =>
         @write_frame('<script>\np(' .. JSON.encode(payload) .. ');\n</script>\r\n')
+      @once 'end', () -> @do_reasoned_close 1006, 'Connection closed'
       -- register session
       session = Session.get_or_create sid, options
-      session\bind self
+      session\register self
       return
 
     -- eventsource
 
     ['GET ${prefix}/[^./]+/([^./]+)/eventsource[/]?$' % options]: (nxt, sid) =>
       handle_balancer_cookie self
-      @set_chunked()
       -- N.B. Opera needs one more new line at the start
       @send 200, '\r\n', {
         ['Content-Type']: 'text/event-stream; charset=UTF-8'
@@ -494,16 +494,16 @@ return (options = {}) ->
       @curr_size, @max_size = 0, options.response_limit
       @send_frame = (payload) =>
         @write_frame('data: ' .. escape_for_eventsource(payload) .. '\r\n\r\n')
+      @once 'end', () -> @do_reasoned_close 1006, 'Connection closed'
       -- register session
       session = Session.get_or_create sid, options
-      session\bind self
+      session\register self
       return
 
     -- chunking_test
 
     ['POST ${prefix}/chunking_test[/]?$' % options]: (nxt) =>
       handle_xhr_cors self
-      @set_chunked()
       @send 200, nil, {
         ['Content-Type']: 'application/javascript; charset=UTF-8' -- for FF
       }, false
@@ -598,12 +598,12 @@ return (options = {}) ->
         --@write_frame '\255'
       -- register session
       session = Session.get_or_create nil, options
-      session\bind self
+      --session\register self
       ---
       ---
       --shaker = if ver == '8' or ver == '7' then WebHandshake8 else WebHandshakeHixie76
       shaker = require('lib/stack/sockjs-websocket').handshake
-      shaker self, origin, location --, () -> session\bind self
+      shaker self, origin, location, () -> session\register self
       return
   
   }
