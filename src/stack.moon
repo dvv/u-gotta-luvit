@@ -50,7 +50,7 @@ class Stack
   run: (port = 80, host = '0.0.0.0') =>
     server = require('http').create_server(host, port, @handler)
     -- handle Upgrade:
-    server\on 'upgrade', @handler
+    --server\on 'upgrade', @handler
     server
 
 -----------------------------------------------------------

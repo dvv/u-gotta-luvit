@@ -1,0 +1,1 @@
+var client_opts = {"url":"http://localhost:8080","sockjs_opts":{"devel":true,"debug":true}};

@@ -203,6 +203,7 @@ Session = (function()
     end,
     onmessage = function(self, payload)
       if self.readyState == Transport.OPEN then
+        p('MESSAGE', payload)
         self:emit('message', payload)
       end
       return 
@@ -211,7 +212,7 @@ Session = (function()
       if self.readyState ~= Transport.OPEN then
         return false
       end
-      Table.insert(self.send_buffer, tostring(payload))
+      Table.insert(self.send_buffer, payload)
       if self.recv then
         self:flush()
       end
@@ -402,16 +403,16 @@ return function(options)
         local status
         status, data = pcall(JSON.decode, data)
         if not status then
+          p(status, data)
+          error('JSON')
+        end
+        if not status then
           return self:fail('Broken JSON encoding.')
         end
         if not is_array(data) then
           return self:fail('Payload expected.')
         end
-        local _list_0 = data
-        for _index_0 = 1, #_list_0 do
-          local message = _list_0[_index_0]
-          session:onmessage(message)
-        end
+        session:onmessage(data)
         self:send(204, nil, {
           ['Content-Type'] = 'text/plain'
         })
@@ -463,6 +464,10 @@ return function(options)
         end
         local status
         status, data = pcall(JSON.decode, data)
+        if not status then
+          p(status, data)
+          error('JSON')
+        end
         if not status then
           return self:fail('Broken JSON encoding.')
         end

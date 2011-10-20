@@ -203,12 +203,13 @@ class Session extends EventEmitter
 
   onmessage: (payload) =>
     if @readyState == Transport.OPEN
+      p('MESSAGE', payload)
       @emit 'message', payload
     return
 
   send: (payload) =>
     return false if @readyState != Transport.OPEN
-    Table.insert @send_buffer, tostring(payload)
+    Table.insert @send_buffer, payload
     @flush() if @recv
     true
 
@@ -367,12 +368,16 @@ return (options = {}) ->
         data = nil if not allowed_content_types.xhr[ctype]
         return @fail 'Payload expected.' if not data
         status, data = pcall JSON.decode, data
+        if not status
+          p(status, data)
+          error('JSON')
         return @fail 'Broken JSON encoding.' if not status
         -- we expect array of messages
         return @fail 'Payload expected.' if not is_array data
         -- process message
-        for message in *data
-          session\onmessage message
+        --for message in *data
+        --  session\onmessage message
+        session\onmessage data
         -- respond ok
         @send 204, nil, {
           ['Content-Type']: 'text/plain' -- for FF
@@ -412,6 +417,9 @@ return (options = {}) ->
         data = nil if data == ''
         return @fail 'Payload expected.' if not data
         status, data = pcall JSON.decode, data
+        if not status
+          p(status, data)
+          error('JSON')
         return @fail 'Broken JSON encoding.' if not status
         -- we expect array of messages
         return @fail 'Payload expected.' if not is_array data
