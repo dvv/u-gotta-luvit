@@ -209,7 +209,8 @@ class Session extends EventEmitter
 
   send: (payload) =>
     return false if @readyState != Transport.OPEN
-    Table.insert @send_buffer, payload
+    -- TODO: booleans won't get stringified by concat
+    Table.insert @send_buffer, type(payload) == 'table' and Table.concat(payload, ',') or tostring(payload)
     @flush() if @recv
     true
 
@@ -368,16 +369,15 @@ return (options = {}) ->
         data = nil if not allowed_content_types.xhr[ctype]
         return @fail 'Payload expected.' if not data
         status, data = pcall JSON.decode, data
-        if not status
+        [==[if not status
           p(status, data)
-          error('JSON')
+          error('JSON')]==]
         return @fail 'Broken JSON encoding.' if not status
         -- we expect array of messages
         return @fail 'Payload expected.' if not is_array data
         -- process message
-        --for message in *data
-        --  session\onmessage message
-        session\onmessage data
+        for message in *data
+          session\onmessage message
         -- respond ok
         @send 204, nil, {
           ['Content-Type']: 'text/plain' -- for FF
@@ -387,9 +387,11 @@ return (options = {}) ->
         error err
         return
       @req\on 'end', process
+      expected_length = tonumber(@req.headers['content-length'] or '0')
       @req\on 'data', (chunk) ->
         data = if data then data .. chunk else chunk
-        process()
+        if #data >= expected_length
+          process()
         return
       return
 
@@ -416,15 +418,19 @@ return (options = {}) ->
           data = decoder(data).d
         data = nil if data == ''
         return @fail 'Payload expected.' if not data
-        status, data = pcall JSON.decode, data
-        if not status
-          p(status, data)
-          error('JSON')
+        status, messages = pcall JSON.decode, data
+        [==[if not status
+          p(status, messages)
+          io = require('io')
+          file = io.open('/home/dvv/LUA/u-gotta-luvit/JSON.DUMP', 'w')
+          file\write(data)
+          file\close()
+          error('JSON')]==]
         return @fail 'Broken JSON encoding.' if not status
         -- we expect array of messages
-        return @fail 'Payload expected.' if not is_array data
+        return @fail 'Payload expected.' if not is_array messages
         -- process message
-        for message in *data
+        for message in *messages
           session\onmessage message
         -- respond ok
         @send 200, 'ok', {
@@ -435,9 +441,11 @@ return (options = {}) ->
         error err
         return
       @req\on 'end', process
+      expected_length = tonumber(@req.headers['content-length'] or '0')
       @req\on 'data', (chunk) ->
         data = if data then data .. chunk else chunk
-        process()
+        if #data >= expected_length
+          process()
         return
       return
 
@@ -515,11 +523,13 @@ return (options = {}) ->
       @send 200, nil, {
         ['Content-Type']: 'application/javascript; charset=UTF-8' -- for FF
       }, false
-      @write (String.rep ' ', 2048) .. 'h\n'
-      for k, delay in ipairs {5, 25+5, 125+25+5, 625+125+25+5, 3125+625+125+25+5}
+      @write 'h\n'
+      for k, delay in ipairs {1, 1+5, 25+5+1, 125+25+5+1, 625+125+25+5+1, 3125+625+125+25+5+1}
         set_timeout delay, () ->
-          --pcall write, self, 'h\n'
-          @write 'h\n'
+          if k == 1
+            @write (String.rep ' ', 2048) .. 'h\n'
+          else
+            @write 'h\n'
       return
 
     ['OPTIONS ${prefix}/chunking_test[/]?$' % options]: (nxt) =>
@@ -575,15 +585,15 @@ return (options = {}) ->
 
     -- close request
 
-    ['GET /close/[^./]+/[^./]+/websocket[/]?']: (nxt) =>
-      @send 101, 'c[3000,"Go away!"]\n'
+    ['(%w+) /close/']: (nxt, verb) =>
+      @send 200, 'c[3000,"Go away!"]\n'
       return
 
     -- websockets
   
     -- TODO: localize handler, reuse in two patterns
-    --['(%w+) ${prefix}/[^./]+/[^./]+/websocket[/]?$' % options]: (nxt, verb) =>
-    ['(%w+) /(%w+)/[^./]+/[^./]+/websocket[/]?$' % options]: (nxt, verb, root) =>
+    --['(%w+) /(%w+)/[^./]+/[^./]+/websocket[/]?$' % options]: (nxt, verb, root) =>
+    ['(%w+) ${prefix}/[^./]+/[^./]+/websocket[/]?$' % options]: (nxt, verb, root) =>
       if verb != 'GET'
         return @send 405
       if String.lower(@req.headers.upgrade or '') != 'websocket'
@@ -611,5 +621,8 @@ return (options = {}) ->
       return
   
   }
+
+  for k, v in pairs routes
+    p(k)
 
   routes

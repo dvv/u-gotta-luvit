@@ -212,7 +212,7 @@ Session = (function()
       if self.readyState ~= Transport.OPEN then
         return false
       end
-      Table.insert(self.send_buffer, payload)
+      Table.insert(self.send_buffer, type(payload) == 'table' and Table.concat(payload, ',') or tostring(payload))
       if self.recv then
         self:flush()
       end
@@ -402,17 +402,20 @@ return function(options)
         end
         local status
         status, data = pcall(JSON.decode, data)
-        if not status then
+        _ = [==[if not status
           p(status, data)
-          error('JSON')
-        end
+          error('JSON')]==]
         if not status then
           return self:fail('Broken JSON encoding.')
         end
         if not is_array(data) then
           return self:fail('Payload expected.')
         end
-        session:onmessage(data)
+        local _list_0 = data
+        for _index_0 = 1, #_list_0 do
+          local message = _list_0[_index_0]
+          session:onmessage(message)
+        end
         self:send(204, nil, {
           ['Content-Type'] = 'text/plain'
         })
@@ -423,13 +426,16 @@ return function(options)
         return 
       end)
       self.req:on('end', process)
+      local expected_length = tonumber(self.req.headers['content-length'] or '0')
       self.req:on('data', function(chunk)
         if data then
           data = data .. chunk
         else
           data = chunk
         end
-        process()
+        if #data >= expected_length then
+          process()
+        end
         return 
       end)
       return 
@@ -462,19 +468,21 @@ return function(options)
         if not data then
           return self:fail('Payload expected.')
         end
-        local status
-        status, data = pcall(JSON.decode, data)
-        if not status then
-          p(status, data)
-          error('JSON')
-        end
+        local status, messages = pcall(JSON.decode, data)
+        _ = [==[if not status
+          p(status, messages)
+          io = require('io')
+          file = io.open('/home/dvv/LUA/u-gotta-luvit/JSON.DUMP', 'w')
+          file\write(data)
+          file\close()
+          error('JSON')]==]
         if not status then
           return self:fail('Broken JSON encoding.')
         end
-        if not is_array(data) then
+        if not is_array(messages) then
           return self:fail('Payload expected.')
         end
-        local _list_0 = data
+        local _list_0 = messages
         for _index_0 = 1, #_list_0 do
           local message = _list_0[_index_0]
           session:onmessage(message)
@@ -489,13 +497,16 @@ return function(options)
         return 
       end)
       self.req:on('end', process)
+      local expected_length = tonumber(self.req.headers['content-length'] or '0')
       self.req:on('data', function(chunk)
         if data then
           data = data .. chunk
         else
           data = chunk
         end
-        process()
+        if #data >= expected_length then
+          process()
+        end
         return 
       end)
       return 
@@ -560,16 +571,21 @@ return function(options)
       self:send(200, nil, {
         ['Content-Type'] = 'application/javascript; charset=UTF-8'
       }, false)
-      self:write((String.rep(' ', 2048)) .. 'h\n')
+      self:write('h\n')
       for k, delay in ipairs({
-        5,
-        25 + 5,
-        125 + 25 + 5,
-        625 + 125 + 25 + 5,
-        3125 + 625 + 125 + 25 + 5
+        1,
+        1 + 5,
+        25 + 5 + 1,
+        125 + 25 + 5 + 1,
+        625 + 125 + 25 + 5 + 1,
+        3125 + 625 + 125 + 25 + 5 + 1
       }) do
         set_timeout(delay, function()
-          return self:write('h\n')
+          if k == 1 then
+            return self:write((String.rep(' ', 2048)) .. 'h\n')
+          else
+            return self:write('h\n')
+          end
         end)
       end
       return 
@@ -621,11 +637,11 @@ return function(options)
       self:send(200)
       return 
     end,
-    ['GET /close/[^./]+/[^./]+/websocket[/]?'] = function(self, nxt)
-      self:send(101, 'c[3000,"Go away!"]\n')
+    ['(%w+) /close/'] = function(self, nxt, verb)
+      self:send(200, 'c[3000,"Go away!"]\n')
       return 
     end,
-    ['(%w+) /(%w+)/[^./]+/[^./]+/websocket[/]?$' % options] = function(self, nxt, verb, root)
+    ['(%w+) ${prefix}/[^./]+/[^./]+/websocket[/]?$' % options] = function(self, nxt, verb, root)
       if verb ~= 'GET' then
         return self:send(405)
       end
@@ -665,5 +681,8 @@ return function(options)
       return 
     end
   }
+  for k, v in pairs(routes) do
+    p(k)
+  end
   return routes
 end

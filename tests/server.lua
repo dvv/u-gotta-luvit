@@ -21,13 +21,14 @@ layers = function()
       onconnection = function(conn)
         return conn:on('message', function(m)
           local n
-          status, n = Math.floor(tonumber(m))
+          status, n = pcall(Math.floor, tonumber(m, 10))
           if not status then
             p('MATH FAILED', m, n)
             error(m)
           end
+          p('MATH', m, n)
           n = (n > 0 and n < 19) and n or 1
-          conn:send(String.rep('x', Math.pow(2, n) + 1))
+          conn:send(String.rep('x', Math.pow(2, n)))
         end)
       end
     })),

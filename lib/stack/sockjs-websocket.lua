@@ -125,9 +125,10 @@ WebHandshakeHixie76 = function(self, origin, location, cb)
   end)
   self.send_frame = function(self, payload)
     p('SEND', payload)
-    self:write_frame('\000')
-    self:write_frame(payload)
-    return self:write_frame('\255')
+    self:write('\000' .. payload .. '\255')
+    return [==[@write '\000'
+    @write payload
+    @write '\255']==]
   end
 end
 local verify_hybi_secret

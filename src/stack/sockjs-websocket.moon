@@ -88,10 +88,14 @@ WebHandshakeHixie76 = (origin, location, cb) =>
     return
   @send_frame = (payload) =>
     p('SEND', payload)
-    --@write_frame '\000' .. payload .. '\255'
-    @write_frame '\000'
-    @write_frame payload
-    @write_frame '\255'
+    -- N.B. plain write(), not write_frame(), not not account for max_size
+    @write '\000' .. payload .. '\255'
+    -- N.B. trade speed for memory usage
+    [==[@write '\000'
+    @write payload
+    @write '\255']==]
+  --if @req.upgrade
+  --  @req\emit 'upgrade'
 
 verify_hybi_secret = (key) ->
   data = (String.match(key, '(%S+)')) .. '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
