@@ -9,7 +9,7 @@ slice = String.sub
 byte = String.byte
 push = Table.insert
 join = Table.concat
-JSON = require 'cjson'
+JSON = require '../cjson'
 
 validate_hixie76_crypto = (req_headers, nonce) ->
   k1 = req_headers['sec-websocket-key1']

@@ -2,6 +2,9 @@
 -- creationix/Stack ported
 --
 
+require './request'
+require './response'
+
 class Stack
 
   --
@@ -9,7 +12,7 @@ class Stack
   --
   -- N.B. static method
   use: (lib_layer_name) ->
-    require('lib/stack/' .. lib_layer_name)
+    require(__dirname .. '/stack/' .. lib_layer_name)
 
   --
   -- given table of middleware layers, returns the function
@@ -18,18 +21,16 @@ class Stack
   new: (layers) =>
     error_handler = @error_handler
     handler = error_handler
-    for i = #layers,1,-1
+    for i = #layers, 1, -1
       layer = layers[i]
       child = handler
       handler = (req, res) ->
         fn = (err) ->
           if err
-            p('ERRINSTACK1', err)
             error_handler req, res, err
           else
             child req, res
         status, err = pcall(layer, req, res, fn)
-        p('ERRINSTACK2', err, status) if err
         error_handler req, res, err if not status
     @handler = handler
 
@@ -49,100 +50,7 @@ class Stack
   --
   run: (port = 80, host = '0.0.0.0') =>
     server = require('http').create_server(host, port, @handler)
-    -- handle Upgrade:
-    --server\on 'upgrade', @handler
     server
-
------------------------------------------------------------
---
--- augment Request and Response
---
------------------------------------------------------------
-
-Request = require 'request'
-Response = require 'response'
-FS = require 'fs'
-
-noop = () ->
-
-Response.prototype.safe_write = (chunk, cb = noop) =>
-  @write chunk, (err, result) ->
-    return cb err, result if not err
-    -- retry on EBUSY
-    if err == 16
-      @safe_write chunk, cb
-    else
-      p('WRITE FAILED', err)
-      cb err
-
-Response.prototype.set_chunked = () =>
-  @set_header 'Transfer-Encoding', 'chunked'
-  @chunked = true
-
-Response.prototype.send = (code, data, headers, close = true) =>
-  p('RESPONSE', @req and @req.url, code, data)
-  @write_head code, headers
-  @write data if data
-  @close() if close
-
-[==[
-Response.prototype.send = (code, data, headers, close = true) =>
-  h = @headers or {}
-  for k, v in pairs(headers or {})
-    h[k] = v
-  --FIXME: should be tunable
-  if not h['Content-Length']
-    h['Transfer-Encoding'] = 'chunked'
-  if h['Transfer-Encoding'] == 'chunked'
-    @chunked = true
-  p('RESPONSE', @req and @req.url, code, data, h)
-  @write_head code, h or {}
-  @write data if data
-  @close() if close
-
--- defines response header
-Response.prototype.set_header = (name, value) =>
-  @headers = {} if not @headers
-  -- TODO: multiple values should glue
-  @headers[name] = value
-]==]
-
--- serve 500 error and reason
-Response.prototype.fail = (reason) =>
-  @send 500, reason, {
-    ['Content-Type']: 'text/plain; charset=UTF-8'
-    ['Content-Length']: #reason
-  }
-
--- serve 404 error
-Response.prototype.serve_not_found = () =>
-  @send 404
-
--- serve 304 not modified
-Response.prototype.serve_not_modified = (headers) =>
-  @send 304, nil, headers
-
--- serve 416 invalid range
-Response.prototype.serve_invalid_range = (size) =>
-  @send 416, nil, {
-    ['Content-Range']: 'bytes=*/' .. size
-  }
-
--- render file named `template` with data from `data` table
--- and serve it with status 200 as text/html
-Response.prototype.render = (template, data = {}, options = {}) =>
-  d('render', template, data)
-
-  FS.read_file template, (err, text) ->
-    if err
-      @serve_not_found()
-    else
-      html = (text % data)
-      @send 200, html, {
-        ['Content-Type']: 'text/html; charset=UTF-8'
-        ['Content-Length']: #html
-      }
 
 -- export module
 return Stack
-

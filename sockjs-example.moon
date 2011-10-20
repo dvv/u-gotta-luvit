@@ -1,5 +1,8 @@
-require 'lib/util'
-Stack = require 'lib/stack'
+package.path = '?.lua'
+package.cpath = '?.so'
+
+require './lib/util'
+Stack = require './lib/stack'
 
 _error = error
 error = (...) -> p('BADBADBAD ERROR', ...)

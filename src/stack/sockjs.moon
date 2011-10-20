@@ -5,7 +5,7 @@
 
 EventEmitter = setmetatable {}, __index: require('emitter').meta
 import set_timeout, clear_timer from require 'timer'
-JSON = require 'cjson'
+JSON = require '../cjson'
 import date, time from require 'os'
 Math = require 'math'
 

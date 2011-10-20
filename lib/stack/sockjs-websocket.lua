@@ -22,7 +22,7 @@ local slice = String.sub
 local byte = String.byte
 local push = Table.insert
 local join = Table.concat
-local JSON = require('cjson')
+local JSON = require('../cjson')
 local validate_hixie76_crypto
 validate_hixie76_crypto = function(req_headers, nonce)
   local k1 = req_headers['sec-websocket-key1']

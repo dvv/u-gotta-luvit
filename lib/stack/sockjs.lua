@@ -7,7 +7,7 @@ do
   set_timeout = _table_0.set_timeout
   clear_timer = _table_0.clear_timer
 end
-local JSON = require('cjson')
+local JSON = require('../cjson')
 local date, time
 do
   local _table_0 = require('os')

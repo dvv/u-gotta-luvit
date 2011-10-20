@@ -1,5 +1,7 @@
-require('lib/util')
-local Stack = require('lib/stack')
+package.path = '?.lua'
+package.cpath = '?.so'
+require('./lib/util')
+local Stack = require('./lib/stack')
 local _error = error
 local error
 error = function(...)
