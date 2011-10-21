@@ -5,14 +5,25 @@
 require './request'
 require './response'
 
+library = {
+  auth: require './auth'
+  body: require './body'
+  health: require './health'
+  rest: require './rest'
+  route: require './route'
+  session: require './session'
+  static: require './static'
+  sockjs: require './../sockjs/'
+}
+
 class Stack
 
   --
   -- lazily load specified library layer and return its setup function
   --
   -- N.B. static method
-  use: (lib_layer_name) ->
-    require(__dirname .. '/stack/' .. lib_layer_name)
+  use: (lib_layer_name) -> library[lib_layer_name]
+  --  require('./' .. lib_layer_name)
 
   --
   -- given table of middleware layers, returns the function

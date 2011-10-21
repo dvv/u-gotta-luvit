@@ -1,7 +1,5 @@
-package.path = '?.lua'
-package.cpath = '?.so'
-require('./lib/util')
-local Stack = require('./lib/stack')
+require('lib/util')
+local Stack = require('lib/stack/')
 local _error = error
 local error
 error = function(...)
@@ -21,9 +19,12 @@ layers = function()
       end
     })),
     Stack.use('route')({
-      ['GET /$'] = function(self, nxt)
-        return self:render('index.html', self.req.context)
-      end
+      {
+        'GET /$',
+        function(self, nxt)
+          return self:render('index.html', self.req.context)
+        end
+      }
     }),
     Stack.use('static')('/public/', 'public/', { })
   }

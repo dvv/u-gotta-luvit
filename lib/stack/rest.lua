@@ -140,7 +140,7 @@ return function(mount, options)
       if response then
         res:write(encode(response))
       end
-      return res:close()
+      return res:finish()
     end
     local context = req.context or options.context or { }
     resource = context[resource]

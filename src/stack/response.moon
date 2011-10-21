@@ -8,6 +8,8 @@ FS = require 'fs'
 
 noop = () ->
 
+Response.prototype.auto_server = 'U-Gotta-Luvit'
+
 Response.prototype.safe_write = (chunk, cb = noop) =>
   @write chunk, (err, result) ->
     return cb err, result if not err
@@ -18,37 +20,30 @@ Response.prototype.safe_write = (chunk, cb = noop) =>
       p('WRITE FAILED', err)
       cb err
 
-Response.prototype.set_chunked = () =>
-  @set_header 'Transfer-Encoding', 'chunked'
-  @chunked = true
-
 Response.prototype.send = (code, data, headers, close = true) =>
   p('RESPONSE', @req and @req.url, code, data)
-  @write_head code, headers
+  @write_head code, headers or {}
   @write data if data
-  @close() if close
-
-[==[
-Response.prototype.send = (code, data, headers, close = true) =>
-  h = @headers or {}
-  for k, v in pairs(headers or {})
-    h[k] = v
-  --FIXME: should be tunable
-  if not h['Content-Length']
-    h['Transfer-Encoding'] = 'chunked'
-  if h['Transfer-Encoding'] == 'chunked'
-    @chunked = true
-  p('RESPONSE', @req and @req.url, code, data, h)
-  @write_head code, h or {}
-  @write data if data
-  @close() if close
+  @finish() if close
+  p('DONE')
 
 -- defines response header
 Response.prototype.set_header = (name, value) =>
   @headers = {} if not @headers
   -- TODO: multiple values should glue
   @headers[name] = value
-]==]
+
+-- monkey patch write_head to support set_header
+_write_head = Response.prototype.write_head
+Response.prototype.write_head = (code, headers, callback) =>
+  h = {}
+  for k, v in pairs(@headers or {})
+    h[k] = v
+  for k, v in pairs(headers or {})
+    h[k] = v
+  --p('HEADERS', h)
+  _write_head self, code, h, callback
+  
 
 -- serve 500 error and reason
 Response.prototype.fail = (reason) =>

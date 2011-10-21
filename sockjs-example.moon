@@ -1,8 +1,5 @@
-package.path = '?.lua'
-package.cpath = '?.so'
-
-require './lib/util'
-Stack = require './lib/stack'
+require 'lib/util'
+Stack = require 'lib/stack/'
 
 _error = error
 error = (...) -> p('BADBADBAD ERROR', ...)
@@ -19,10 +16,11 @@ layers = () -> {
   }))
 
   -- serve chrome page
-  Stack.use('route')({
-    ['GET /$']: (nxt) =>
+  Stack.use('route')({{
+    'GET /$'
+    (nxt) =>
       @render 'index.html', @req.context
-  })
+  }})
 
   -- serve static files
   Stack.use('static')('/public/', 'public/', {

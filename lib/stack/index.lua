@@ -1,11 +1,21 @@
 require('./request')
 require('./response')
+local library = {
+  auth = require('./auth'),
+  body = require('./body'),
+  health = require('./health'),
+  rest = require('./rest'),
+  route = require('./route'),
+  session = require('./session'),
+  static = require('./static'),
+  sockjs = require('./../sockjs/')
+}
 local Stack
 Stack = (function()
   local _parent_0 = nil
   local _base_0 = {
     use = function(lib_layer_name)
-      return require(__dirname .. '/stack/' .. lib_layer_name)
+      return library[lib_layer_name]
     end,
     error_handler = function(req, res, err)
       if err then

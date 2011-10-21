@@ -2,6 +2,7 @@ local Response = require('response')
 local FS = require('fs')
 local noop
 noop = function() end
+Response.prototype.auto_server = 'U-Gotta-Luvit'
 Response.prototype.safe_write = function(self, chunk, cb)
   if cb == nil then
     cb = noop
@@ -18,43 +19,37 @@ Response.prototype.safe_write = function(self, chunk, cb)
     end
   end)
 end
-Response.prototype.set_chunked = function(self)
-  self:set_header('Transfer-Encoding', 'chunked')
-  self.chunked = true
-end
 Response.prototype.send = function(self, code, data, headers, close)
   if close == nil then
     close = true
   end
   p('RESPONSE', self.req and self.req.url, code, data)
-  self:write_head(code, headers)
+  self:write_head(code, headers or { })
   if data then
     self:write(data)
   end
   if close then
-    return self:close()
+    self:finish()
   end
+  return p('DONE')
 end
-local _ = [==[Response.prototype.send = (code, data, headers, close = true) =>
-  h = @headers or {}
-  for k, v in pairs(headers or {})
+Response.prototype.set_header = function(self, name, value)
+  if not self.headers then
+    self.headers = { }
+  end
+  self.headers[name] = value
+end
+local _write_head = Response.prototype.write_head
+Response.prototype.write_head = function(self, code, headers, callback)
+  local h = { }
+  for k, v in pairs(self.headers or { }) do
     h[k] = v
-  --FIXME: should be tunable
-  if not h['Content-Length']
-    h['Transfer-Encoding'] = 'chunked'
-  if h['Transfer-Encoding'] == 'chunked'
-    @chunked = true
-  p('RESPONSE', @req and @req.url, code, data, h)
-  @write_head code, h or {}
-  @write data if data
-  @close() if close
-
--- defines response header
-Response.prototype.set_header = (name, value) =>
-  @headers = {} if not @headers
-  -- TODO: multiple values should glue
-  @headers[name] = value
-]==]
+  end
+  for k, v in pairs(headers or { }) do
+    h[k] = v
+  end
+  return _write_head(self, code, h, callback)
+end
 Response.prototype.fail = function(self, reason)
   return self:send(500, reason, {
     ['Content-Type'] = 'text/plain; charset=UTF-8',

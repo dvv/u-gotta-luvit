@@ -1,2 +1,2 @@
 _G.foo = 123
-_G.bar = require('./module2/index').bar
+_G.bar = require('./module2/').bar

@@ -1,6 +1,9 @@
-class Foo
-  new: () =>
-  foo: -> p('FOO')
-
-class Bar extends Foo
-  bar: -> p('BAR')
+layers = () -> {
+foo({
+  1
+  2
+}),
+{
+  3
+  4
+}}

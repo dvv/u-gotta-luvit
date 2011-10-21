@@ -145,7 +145,7 @@ return (mount = '/rpc/', options = {}) ->
           }
       --p('RPC!!', response)
       res\write encode(response) if response
-      res\close()
+      res\finish()
 
     --
     -- find the handler

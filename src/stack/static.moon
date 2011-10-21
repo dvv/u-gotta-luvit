@@ -31,7 +31,7 @@ stream_file = (path, offset, size, progress, callback) ->
           if progress
             progress chunk, readchunk
           else
-            readchunk
+            readchunk()
     readchunk()
 
 --
@@ -75,7 +75,6 @@ return (mount, root, options = {}) ->
   serve = (file, range, cache_it) =>
     -- adjust headers
     headers = extend {}, file.headers
-    headers['Date'] = date '%c'
     --
     size = file.size
     start = 0
@@ -99,7 +98,7 @@ return (mount, root, options = {}) ->
     if file.data
       @safe_write range and file.data.sub(start + 1, stop - start + 1) or file.data, (...) ->
       --d('write', ...)
-        @close()
+        @finish()
     -- otherwise stream and possibly cache
     else
       -- N.B. don't cache if range specified
@@ -113,7 +112,7 @@ return (mount, root, options = {}) ->
         @safe_write(chunk, cb)
       -- eof
       eof = (err) ->
-        @close()
+        @finish()
         if cache_it
           NUM2 = NUM2 + 1
           d("cached", NUM2, {path: filename, headers: file.headers})

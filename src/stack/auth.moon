@@ -18,4 +18,4 @@ return (url = '/rpc/auth', options = {}) ->
         }
 
     else
-      nxt!
+      nxt()

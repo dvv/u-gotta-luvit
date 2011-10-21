@@ -12,4 +12,4 @@ return (url = '/haproxy?monitor') ->
     if req.url == url
       res\send 200, nil, {}
     else
-      nxt!
+      nxt()
