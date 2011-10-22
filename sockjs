@@ -1,4 +1,4 @@
 #!/bin/sh
 
-(cd src ; moonc -t ../lib * )
+( rm -fr lib && cd src && moonc -t ../lib * )
 moonc sockjs-example.moon && strace -f -v -s1024 -o log ./luvit sockjs-example.lua

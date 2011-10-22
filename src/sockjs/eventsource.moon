@@ -13,7 +13,7 @@ escape_for_eventsource = (str) ->
 -- eventsource request handler
 --
 handler = (nxt, root, sid) =>
-  options = servers[root]
+  options = @get_options(root)
   return nxt() if not options
   @handle_balancer_cookie()
   -- N.B. Opera needs one more new line at the start
@@ -27,7 +27,7 @@ handler = (nxt, root, sid) =>
   @send_frame = (payload) =>
     @write_frame('data: ' .. escape_for_eventsource(payload) .. '\r\n\r\n')
   -- register session
-  session = Session.get_or_create sid, options
+  session = @get_session sid, options
   session\bind self
   return
 

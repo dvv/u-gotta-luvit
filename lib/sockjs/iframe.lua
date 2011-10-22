@@ -28,6 +28,10 @@ local iframe_template = [[<!DOCTYPE html>
 ]]
 local handler
 handler = function(self, nxt, root)
+  local options = self:get_options(root)
+  if not options then
+    return nxt()
+  end
   local content = gsub(iframe_template, '{{ sockjs_url }}', options.sockjs_url)
   local etag = tostring(#content)
   if self.req.headers['if-none-match'] == etag then

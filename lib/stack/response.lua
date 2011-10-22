@@ -23,15 +23,14 @@ Response.prototype.send = function(self, code, data, headers, close)
   if close == nil then
     close = true
   end
-  p('RESPONSE', self.req and self.req.url, code, data)
+  p('RESPONSE', self.req and self.req.method, self.req and self.req.url, code, data)
   self:write_head(code, headers or { })
   if data then
     self:write(data)
   end
   if close then
-    self:finish()
+    return self:finish()
   end
-  return p('DONE')
 end
 Response.prototype.set_header = function(self, name, value)
   if not self.headers then

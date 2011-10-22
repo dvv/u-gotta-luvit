@@ -1,3 +1,4 @@
+import date, time from require 'os'
 import rep from require 'string'
 import set_timeout from require 'timer'
 
@@ -7,8 +8,10 @@ import set_timeout from require 'timer'
 
 return {
 {
-  'POST /.+/chunking_test[/]?$'
-  (nxt) =>
+  'POST (/.+)/chunking_test[/]?$'
+  (nxt, root) =>
+    options = @get_options(root)
+    return nxt() if not options
     @handle_xhr_cors()
     @send 200, nil, {
       ['Content-Type']: 'application/javascript; charset=UTF-8' -- for FF
@@ -25,6 +28,8 @@ return {
 {
   'OPTIONS (/.+)/chunking_test[/]?$'
   (nxt, root) =>
+    options = @get_options(root)
+    return nxt() if not options
     @handle_xhr_cors()
     @handle_balancer_cookie()
     @send 204, nil, {

@@ -4,7 +4,7 @@ import rep from require 'string'
 -- xhr streaming request handler
 --
 handler = (nxt, root, sid) =>
-  options = servers[root]
+  options = @get_options(root)
   return nxt() if not options
   @handle_xhr_cors()
   @handle_balancer_cookie()
@@ -20,7 +20,7 @@ handler = (nxt, root, sid) =>
   @send_frame = (payload) =>
     @write_frame(payload .. '\n')
   -- register session
-  session = Session.get_or_create sid, options
+  session = @get_session sid, options
   session\bind self
   return
 
@@ -28,4 +28,3 @@ return {
   'POST (/.+)/[^./]+/([^./]+)/xhr_streaming[/]?$'
   handler
 }
-y

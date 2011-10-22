@@ -1,3 +1,9 @@
+local date, time
+do
+  local _table_0 = require('os')
+  date = _table_0.date
+  time = _table_0.time
+end
 local rep
 do
   local _table_0 = require('string')
@@ -10,8 +16,12 @@ do
 end
 return {
   {
-    'POST /.+/chunking_test[/]?$',
-    function(self, nxt)
+    'POST (/.+)/chunking_test[/]?$',
+    function(self, nxt, root)
+      local options = self:get_options(root)
+      if not options then
+        return nxt()
+      end
       self:handle_xhr_cors()
       self:send(200, nil, {
         ['Content-Type'] = 'application/javascript; charset=UTF-8'
@@ -39,6 +49,10 @@ return {
   {
     'OPTIONS (/.+)/chunking_test[/]?$',
     function(self, nxt, root)
+      local options = self:get_options(root)
+      if not options then
+        return nxt()
+      end
       self:handle_xhr_cors()
       self:handle_balancer_cookie()
       self:send(204, nil, {

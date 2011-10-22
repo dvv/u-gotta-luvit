@@ -27,7 +27,7 @@ htmlfile_template = htmlfile_template .. rep(' ', 1024 - #htmlfile_template + 14
 -- htmlfile request handler
 --
 handler = (nxt, root, sid) =>
-  options = servers[root]
+  options = @get_options(root)
   return nxt() if not options
   @handle_balancer_cookie()
   callback = @req.uri.query.c or @req.uri.query.callback
@@ -43,11 +43,11 @@ handler = (nxt, root, sid) =>
   @send_frame = (payload) =>
     @write_frame('<script>\np(' .. encode(payload) .. ');\n</script>\r\n')
   -- register session
-  session = Session.get_or_create sid, options
+  session = @get_session sid, options
   session\bind self
   return
 
 return {
   'GET (/.+)/[^./]+/([^./]+)/htmlfile[/]?$'
-  htmlfile
+  handler
 }

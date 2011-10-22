@@ -21,11 +21,10 @@ Response.prototype.safe_write = (chunk, cb = noop) =>
       cb err
 
 Response.prototype.send = (code, data, headers, close = true) =>
-  p('RESPONSE', @req and @req.url, code, data)
+  p('RESPONSE', @req and @req.method, @req and @req.url, code, data)
   @write_head code, headers or {}
   @write data if data
   @finish() if close
-  p('DONE')
 
 -- defines response header
 Response.prototype.set_header = (name, value) =>

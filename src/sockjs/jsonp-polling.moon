@@ -4,7 +4,7 @@ import encode from require 'cjson'
 -- jsonp polling request handler
 --
 handler = (nxt, root, sid) =>
-  options = servers[root]
+  options = @get_options(root)
   return nxt() if not options
   @handle_balancer_cookie()
   @auto_chunked = false
@@ -20,7 +20,7 @@ handler = (nxt, root, sid) =>
   @send_frame = (payload) =>
     @write_frame(callback .. '(' .. encode(payload) .. ');\r\n')
   -- register session
-  session = Session.get_or_create sid, options
+  session = @get_session sid, options
   session\bind self
   return
 

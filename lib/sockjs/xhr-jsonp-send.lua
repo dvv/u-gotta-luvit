@@ -9,6 +9,8 @@ do
   match = _table_0.match
   parse_query = _table_0.parse_query
 end
+local push = require('table').insert
+local join = require('table').concat
 local allowed_content_types = {
   xhr = {
     ['application/json'] = decode,
@@ -23,9 +25,10 @@ local allowed_content_types = {
     [''] = true
   }
 }
+local Session = require('./session')
 local handler
 handler = function(self, nxt, root, sid, transport)
-  local options = servers[root]
+  local options = self:get_options(root)
   if not options then
     return nxt()
   end
@@ -64,7 +67,7 @@ handler = function(self, nxt, root, sid, transport)
       end
     end
     local status
-    status, data = pcall(JSON.decode, data)
+    status, data = pcall(decode, data)
     if not status then
       return self:fail('Broken JSON encoding.')
     end

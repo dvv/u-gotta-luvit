@@ -1,7 +1,8 @@
-local lower
+local lower, match
 do
   local _table_0 = require('string')
   lower = _table_0.lower
+  match = _table_0.match
 end
 local hixie76 = require('./websocket-hixie76')
 local hybi10 = require('./websocket-hybi10')
@@ -26,6 +27,10 @@ local _ = [==[  if list_of_origins.indexOf('*:*') isnt -1
 ]==]
 local handler
 handler = function(self, nxt, verb, root)
+  local options = self:get_options(root)
+  if not options then
+    return nxt()
+  end
   self.auto_chunked = false
   if verb ~= 'GET' then
     return self:send(405)
@@ -33,11 +38,11 @@ handler = function(self, nxt, verb, root)
   if lower(self.req.headers.upgrade or '') ~= 'websocket' then
     return self:send(400, 'Can "Upgrade" only to "WebSocket".')
   end
-  if lower(self.req.headers.connection or '') ~= 'upgrade' then
+  if not match(',' .. lower(self.req.headers.connection or '') .. ',', '[^%w]+upgrade[^%w]+') then
     return self:send(400, '"Connection" must be "Upgrade".')
   end
   local origin = self.req.headers.origin
-  if not verify_origin(origin, self.options.origins) then
+  if not verify_origin(origin, options.origins) then
     return self:send(400, 'Unverified origin.')
   end
   local location = ((function()
@@ -50,7 +55,7 @@ handler = function(self, nxt, verb, root)
   location = location .. '://' .. self.req.headers.host .. self.req.url
   self:nodelay(true)
   self.protocol = 'websocket'
-  local session = Session.get_or_create(nil, options)
+  local session = self:get_session(nil, options)
   local ver = self.req.headers['sec-websocket-version']
   local shaker
   if ver == '8' or ver == '7' then
@@ -59,10 +64,7 @@ handler = function(self, nxt, verb, root)
     shaker = hixie76
   end
   shaker(self, origin, location, function()
-    session:bind(self)
-    if root == 'close' then
-      return session:close(3000, 'Go away!')
-    end
+    return session:bind(self)
   end)
   return 
 end

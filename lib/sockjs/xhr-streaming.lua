@@ -5,7 +5,7 @@ do
 end
 local handler
 handler = function(self, nxt, root, sid)
-  local options = servers[root]
+  local options = self:get_options(root)
   if not options then
     return nxt()
   end
@@ -20,7 +20,7 @@ handler = function(self, nxt, root, sid)
   self.send_frame = function(self, payload)
     return self:write_frame(payload .. '\n')
   end
-  local session = Session.get_or_create(sid, options)
+  local session = self:get_session(sid, options)
   session:bind(self)
   return 
 end
@@ -28,4 +28,3 @@ return {
   'POST (/.+)/[^./]+/([^./]+)/xhr_streaming[/]?$',
   handler
 }
-local _ = y

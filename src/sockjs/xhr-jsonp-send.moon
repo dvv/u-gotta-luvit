@@ -1,5 +1,7 @@
 import decode from require 'cjson'
 import match, parse_query from require 'string'
+push = require('table').insert
+join = require('table').concat
 
 --
 -- given Content-Type:, provide content decoder
@@ -17,11 +19,13 @@ allowed_content_types = {
     ['']: true
 }
 
+Session = require './session'
+
 --
 -- xhr_send and jsonp_send request handlers
 --
 handler = (nxt, root, sid, transport) =>
-  options = servers[root]
+  options = @get_options(root)
   return nxt() if not options
   xhr = transport == 'xhr'
   @handle_xhr_cors() if xhr
@@ -49,7 +53,7 @@ handler = (nxt, root, sid, transport) =>
       if decoder != true
         data = decoder(data).d or ''
       return @fail 'Payload expected.' if data == ''
-    status, data = pcall JSON.decode, data
+    status, data = pcall decode, data
     return @fail 'Broken JSON encoding.' if not status
     -- we expect array of messages
     return @fail 'Payload expected.' if not is_array data
