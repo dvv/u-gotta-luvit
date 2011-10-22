@@ -65,7 +65,7 @@ return (root, options) ->
   return (req, res, nxt) ->
 
     res.get_options = (root) =>
-      p('ROOT', root)
+      --p('ROOT', root)
       servers[root]
     res.get_session = (sid, options) => Session.get_or_create sid, options
 

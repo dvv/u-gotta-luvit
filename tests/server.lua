@@ -1,44 +1,63 @@
-require('lib/util')
-local Stack = require('lib/stack')
+require('./lib/util')
+local Stack = require('./lib/stack')
+local SockJS = require('./lib/sockjs')
+
 local Math = require('math')
-local layers
-layers = function()
+
+local http_stack_layers
+http_stack_layers = function()
   return {
-    Stack.use('route')(Stack.use('sockjs')({
-      prefix = '/echo',
-      sockjs_url = '/sockjs.js',
-      response_limit = 4096,
-      onconnection = function(conn)
-        return conn:on('message', function(m)
-          return conn:send(m)
-        end)
-      end
-    })),
-    Stack.use('route')(Stack.use('sockjs')({
-      prefix = '/amplify',
-      sockjs_url = '/sockjs.js',
-      response_limit = 4096,
-      onconnection = function(conn)
-        return conn:on('message', function(m)
-          local n
-          status, n = pcall(Math.floor, tonumber(m, 10))
-          if not status then
-            p('MATH FAILED', m, n)
-            error(m)
-          end
-          p('MATH', m, n)
-          n = (n > 0 and n < 19) and n or 1
-          conn:send(String.rep('x', Math.pow(2, n)))
-        end)
-      end
-    })),
     Stack.use('route')({
-      ['GET /$'] = function(self, nxt)
-        return self:render('index.html', self.req.context)
-      end
+      {
+        'GET /$',
+        function(self, nxt)
+          return self:render('index.html', self.req.context)
+        end
+      }
     }),
-    Stack.use('static')('/', '', { })
+    SockJS(),
+    Stack.use('static')('/', '', { }),
   }
 end
-local s1 = Stack(layers()):run(8080)
-print('Point your browser to http://localhost:8080/')
+
+SockJS('/echo', {
+  sockjs_url = '/sockjs.js',
+  response_limit = 4096,
+  onconnection = function(conn)
+    p('CONNE', conn.sid, conn.id)
+    return conn:on('message', function(m)
+      return conn:send(m)
+    end)
+  end
+})
+
+SockJS('/close', {
+  sockjs_url = '/sockjs.js',
+  --response_limit = 4096,
+  onconnection = function(conn)
+    p('CONNC', conn.sid, conn.id)
+    return conn:close(3000, 'Go away!')
+  end
+})
+
+SockJS('/amplify', {
+  sockjs_url = '/sockjs.js',
+  onconnection = function(conn)
+    p('CONNA', conn.sid, conn.id)
+    conn:on('message', function(m)
+      local n
+      status, n = pcall(Math.floor, tonumber(m, 10))
+      if not status then
+        p('MATH FAILED', m, n)
+        error(m)
+      end
+      p('MATH', m, n)
+      n = (n > 0 and n < 19) and n or 1
+      conn:send(String.rep('x', Math.pow(2, n)))
+    end)
+  end
+})
+
+local s1 = Stack(http_stack_layers()):run(8080)
+print('Server listening at http://localhost:8080/')
+require('repl')

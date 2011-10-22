@@ -53,12 +53,14 @@ handler = (nxt, root, sid, transport) =>
       if decoder != true
         data = decoder(data).d or ''
       return @fail 'Payload expected.' if data == ''
-    status, data = pcall decode, data
-    return @fail 'Broken JSON encoding.' if not status
+    status, messages = pcall decode, data
+    if not status
+      --p('BROKENJSON', data)
+      return @fail 'Broken JSON encoding.'
     -- we expect array of messages
-    return @fail 'Payload expected.' if not is_array data
-    -- process message
-    for message in *data
+    return @fail 'Payload expected.' if not is_array messages
+    -- process messages
+    for message in *messages
       session\onmessage message
     -- respond ok
     if xhr

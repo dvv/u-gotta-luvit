@@ -16,6 +16,10 @@ return {
     @send 200, nil, {
       ['Content-Type']: 'application/javascript; charset=UTF-8' -- for FF
     }, false
+    @on 'error', (err) ->
+      -- TODO: generalize?
+      p('CHUNKERRORRES', err)
+      @finish()
     @write 'h\n'
     for k, delay in ipairs {1, 1+5, 25+5+1, 125+25+5+1, 625+125+25+5+1, 3125+625+125+25+5+1}
       set_timeout delay, () ->

@@ -1,13 +1,24 @@
-import gsub from require 'string'
+import sub from require 'string'
 
 --
 -- escape given string for passing safely via EventSource transport
 --
-escape_for_eventsource = (str) ->
-  str = gsub str, '%%', '%25'
-  str = gsub str, '\r', '%0D'
-  str = gsub str, '\n', '%0A'
-  str
+escape_for_eventsource1 = (str) ->
+  s = ''
+  for i = 1, #str
+    c = sub str, i, i
+    print('C', c, c == '\r')
+    if c == '%'
+      c = '%25'
+    if c == '\0'
+      c = '%00'
+    if c == '\r'
+      c = '%0A'
+    if c == '\n'
+      c = '%0D'
+    s = s .. c
+  print(str, '->', s)
+  s
 
 --
 -- eventsource request handler
@@ -25,7 +36,8 @@ handler = (nxt, root, sid) =>
   @protocol = 'eventsource'
   @curr_size, @max_size = 0, options.response_limit
   @send_frame = (payload) =>
-    @write_frame('data: ' .. escape_for_eventsource(payload) .. '\r\n\r\n')
+    p('SEND', payload)
+    @write_frame('data: ' .. payload .. '\r\n\r\n')
   -- register session
   session = @get_session sid, options
   session\bind self

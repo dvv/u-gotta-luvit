@@ -26,8 +26,10 @@ Response.prototype.handle_balancer_cookie = () =>
 --
 Response.prototype.write_frame = (payload) =>
   @curr_size = @curr_size + #payload
+  p('ONWIRE', payload)
   @write payload
   if @max_size and @curr_size >= @max_size
+    p('MAXSIZE EXCEEDED, CLOSING')
     --set_timeout 100, () -> @finish()
     @finish()
   return

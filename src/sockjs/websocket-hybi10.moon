@@ -6,6 +6,7 @@ import get_digest from require 'openssl'
 import floor, random from require 'math'
 import band, bor, bxor, rshift, lshift from require 'bit'
 slice = String.sub
+char = String.char
 byte = String.byte
 push = Table.insert
 join = Table.concat
@@ -20,6 +21,13 @@ verify_secret = (key) ->
   r
 
 rand256 = () -> floor(random() * 256)
+
+-- TODO: VERY INEFFICIENT!!!
+table_to_string = (tbl) ->
+  s = ''
+  for i = 1, #tbl
+    s = s .. char tbl[i]
+  s
 
 return (origin, location, cb) =>
   p('SHAKE8', origin, location)
@@ -91,7 +99,7 @@ return (origin, location, cb) =>
     if masking
       for i = 1, length
         push tbl, bxor(byte(payload, i), key[(i - 1) % 4 + 1])
-      payload = String.char unpack tbl
+      payload = table_to_string tbl
     p('PAYLOAD!', payload, #payload, tbl, #tbl)
     data = slice buf, l + length + 1
     p('ok', masking, length)
@@ -144,7 +152,7 @@ return (origin, location, cb) =>
     for i = 1, pl
       push a, bxor(byte(payload, i), key[(i - 1) % 4 + 1])
     -- N.B. plain write(), not write_frame(), not not account for max_size
-    a = String.char unpack a
+    a = table_to_string a
     p('WRITE', a, a\tohex())
     @write a
   cb() if cb

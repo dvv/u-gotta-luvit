@@ -112,7 +112,8 @@ class Session extends EventEmitter
     @close_frame = Transport.closing_frame status, reason
     if @recv
       @recv\send_frame @close_frame
-      @unbind()
+      --WAS@unbind()
+      @recv\finish()
     return
 
   ontimeout: =>

@@ -1,8 +1,10 @@
 (function() {
   var arrIndexOf, batch_factory_factory, batch_factory_factory_amp, chunking_test_factory, echo_factory_factory, factor_batch_large, factor_batch_large_amp, factor_echo_basic, factor_echo_large_message, factor_echo_rich, factor_echo_special_chars, factor_echo_unicode, factor_server_close, factor_user_close, newSockJS, protocol, protocols, test_invalid_url_404, test_invalid_url_500, test_invalid_url_port, test_protocol_errors, test_protocol_messages, _i, _j, _len, _len2;
 
-  protocols = ['websocket'];
+  //protocols = ['websocket'];
   //protocols = [/*'websocket', */'xhr-streaming', 'iframe-eventsource', 'iframe-htmlfile', 'xhr-polling', 'iframe-xhr-polling', 'jsonp-polling'];
+  protocols = ['iframe-eventsource', 'iframe-htmlfile', 'xhr-polling', 'iframe-xhr-polling', 'jsonp-polling'];
+  //protocols = ['iframe-eventsource'];
 
   newSockJS = function(path, protocol) {
     var url;
@@ -280,19 +282,19 @@
         return log('Unsupported protocol (by server): "' + protocol + '"');
       });
     } else {
-      //asyncTest("echo1", factor_echo_basic(protocol));
-      //asyncTest("echo2", factor_echo_rich(protocol));
-      //asyncTest("unicode", factor_echo_unicode(protocol));
-      //asyncTest("special_chars", factor_echo_special_chars(protocol));
-      //asyncTest("large message (ping-pong)", factor_echo_large_message(protocol));
-      //asyncTest("large message (batch)", factor_batch_large(protocol));
-      //asyncTest("large download", factor_batch_large_amp(protocol));
+      asyncTest("echo1", factor_echo_basic(protocol));
+      asyncTest("echo2", factor_echo_rich(protocol));
+      asyncTest("unicode", factor_echo_unicode(protocol));
+      asyncTest("special_chars", factor_echo_special_chars(protocol));
+      asyncTest("large message (ping-pong)", factor_echo_large_message(protocol));
+      asyncTest("large message (batch)", factor_batch_large(protocol));
+      asyncTest("large download", factor_batch_large_amp(protocol));
       asyncTest("user close", factor_user_close(protocol));
       asyncTest("server close", factor_server_close(protocol));
     }
   };
 
-  /*test_protocol_errors = function(protocol) {
+  test_protocol_errors = function(protocol) {
     module(protocol);
     if (!SockJS[protocol] || !SockJS[protocol].enabled(client_opts.sockjs_opts)) {
       return test("[unsupported by client]", function() {
@@ -307,14 +309,14 @@
       asyncTest("invalid url 500", test_invalid_url_500(protocol));
       return asyncTest("invalid url port", test_invalid_url_port(protocol));
     }
-  };*/
+  };
 
   for (_i = 0, _len = protocols.length; _i < _len; _i++) {
     protocol = protocols[_i];
     test_protocol_messages(protocol);
   }
 
-  /*module('other');
+  module('other');
 
   test("amending url", function() {
     var dl, r, t;
@@ -454,6 +456,6 @@
   for (_j = 0, _len2 = protocols.length; _j < _len2; _j++) {
     protocol = protocols[_j];
     test_protocol_errors(protocol);
-  }*/
+  }
 
 }).call(this);
