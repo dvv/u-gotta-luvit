@@ -12,9 +12,9 @@ local sockjs_routes = {
   (require('./chunking-test'))[1],
   (require('./chunking-test'))[2],
   require('./iframe'),
-  require('./static')
+  require('./base-url-foo')
 }
-local Session = require('./session')
+local Session = require('./transport')
 local servers = { }
 return function(root, options)
   if root then

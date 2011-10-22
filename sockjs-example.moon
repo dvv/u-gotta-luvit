@@ -1,6 +1,6 @@
-require 'lib/util'
-Stack = require 'lib/stack/'
-SockJS = require 'lib/sockjs/'
+require './lib/util'
+Stack = require './lib/stack'
+SockJS = require './lib/sockjs'
 
 _error = error
 error = (...) -> p('BADBADBAD ERROR', ...)

@@ -25,7 +25,7 @@ local allowed_content_types = {
     [''] = true
   }
 }
-local Session = require('./session')
+local Session = require('./transport')
 local handler
 handler = function(self, nxt, root, sid, transport)
   local options = self:get_options(root)
@@ -84,6 +84,7 @@ handler = function(self, nxt, root, sid, transport)
         ['Content-Type'] = 'text/plain'
       })
     else
+      self.auto_content_type = false
       self:send(200, 'ok', {
         ['Content-Length'] = 2
       })

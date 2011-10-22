@@ -19,7 +19,7 @@ allowed_content_types = {
     ['']: true
 }
 
-Session = require './session'
+Session = require './transport'
 
 --
 -- xhr_send and jsonp_send request handlers
@@ -64,6 +64,7 @@ handler = (nxt, root, sid, transport) =>
     if xhr
       @send 204, nil, ['Content-Type']: 'text/plain' -- for FF
     else
+      @auto_content_type = false
       @send 200, 'ok', ['Content-Length']: 2
     return
   @req\on 'error', (err) ->

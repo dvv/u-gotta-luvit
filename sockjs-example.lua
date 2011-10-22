@@ -1,6 +1,6 @@
-require('lib/util')
-local Stack = require('lib/stack/')
-local SockJS = require('lib/sockjs/')
+require('./lib/util')
+local Stack = require('./lib/stack')
+local SockJS = require('./lib/sockjs')
 local _error = error
 local error
 error = function(...)

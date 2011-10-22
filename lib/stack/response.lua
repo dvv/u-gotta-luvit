@@ -23,7 +23,7 @@ Response.prototype.send = function(self, code, data, headers, close)
   if close == nil then
     close = true
   end
-  p('RESPONSE', self.req and self.req.method, self.req and self.req.url, code, data)
+  p('RESPONSE FOR', self.req and self.req.method, self.req and self.req.url, 'IS', code, data)
   self:write_head(code, headers or { })
   if data then
     self:write(data)
@@ -31,23 +31,6 @@ Response.prototype.send = function(self, code, data, headers, close)
   if close then
     return self:finish()
   end
-end
-Response.prototype.set_header = function(self, name, value)
-  if not self.headers then
-    self.headers = { }
-  end
-  self.headers[name] = value
-end
-local _write_head = Response.prototype.write_head
-Response.prototype.write_head = function(self, code, headers, callback)
-  local h = { }
-  for k, v in pairs(self.headers or { }) do
-    h[k] = v
-  end
-  for k, v in pairs(headers or { }) do
-    h[k] = v
-  end
-  return _write_head(self, code, h, callback)
 end
 Response.prototype.fail = function(self, reason)
   return self:send(500, reason, {

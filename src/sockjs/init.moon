@@ -25,7 +25,7 @@ sockjs_routes = {
   (require './chunking-test')[1]
   (require './chunking-test')[2]
   require './iframe'
-  require './static'
+  require './base-url-foo'
 }
 --p(sockjs_routes)
 --process.exit()
@@ -33,7 +33,7 @@ sockjs_routes = {
 --
 -- ???
 --
-Session = require './session'
+Session = require './transport'
 
 --
 -- collection of servers

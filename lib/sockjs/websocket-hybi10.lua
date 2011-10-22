@@ -38,16 +38,12 @@ rand256 = function()
 end
 return function(self, origin, location, cb)
   p('SHAKE8', origin, location)
-  local blob = {
-    'HTTP/1.1 101 Switching Protocols',
-    'Upgrade: WebSocket',
-    'Connection: Upgrade',
-    'Sec-WebSocket-Accept: ' .. String.base64(verify_secret(self.req.headers['sec-websocket-key']))
-  }
-  if self.req.headers['sec-websocket-protocol'] then
-    Table.insert(blob, ('Sec-WebSocket-Protocol: ' .. self.req.headers['sec-websocket-protocol'].split('[^,]*')))
-  end
-  self:write(Table.concat(blob, '\r\n') .. '\r\n\r\n')
+  self:write_head(101, {
+    ['Upgrade'] = 'WebSocket',
+    ['Connection'] = 'Upgrade',
+    ['Sec-WebSocket-Accept'] = String.base64(verify_secret(self.req.headers['sec-websocket-key']))
+  })
+  self.has_body = true
   local data = ''
   local ondata
   ondata = function(chunk)

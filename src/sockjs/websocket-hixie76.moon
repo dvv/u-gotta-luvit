@@ -31,16 +31,14 @@ return (origin, location, cb) =>
   p('SHAKE76', origin, location)
   @sec = @req.headers['sec-websocket-key1']
   prefix = @sec and 'Sec-' or ''
-  blob = {
-    'HTTP/1.1 101 WebSocket Protocol Handshake'
-    'Upgrade: WebSocket'
-    'Connection: Upgrade'
-    prefix .. 'WebSocket-Origin: ' .. origin
-    prefix .. 'WebSocket-Location: ' .. location
+  @write_head 101, {
+    ['Upgrade']: 'WebSocket'
+    ['Connection']: 'Upgrade'
+    [prefix .. 'WebSocket-Origin']: origin
+    [prefix .. 'WebSocket-Location']: location
+    --TODO['Sec-WebSocket-Protocol']: @req.headers['sec-websocket-protocol'].split('[^,]*')
   }
-  if @sec and @req.headers['sec-websocket-protocol']
-    Table.insert blob, ('Sec-WebSocket-Protocol: ' .. @req.headers['sec-websocket-protocol'].split('[^,]*'))
-  @write(Table.concat(blob, '\r\n') .. '\r\n\r\n')
+  @has_body = true -- override bodyless assumption on 101
   -- parse incoming data
   data = ''
   ondata = (chunk) ->

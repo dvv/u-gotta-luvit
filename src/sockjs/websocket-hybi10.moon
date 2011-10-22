@@ -23,15 +23,13 @@ rand256 = () -> floor(random() * 256)
 
 return (origin, location, cb) =>
   p('SHAKE8', origin, location)
-  blob = {
-    'HTTP/1.1 101 Switching Protocols'
-    'Upgrade: WebSocket'
-    'Connection: Upgrade'
-    'Sec-WebSocket-Accept: ' .. String.base64(verify_secret(@req.headers['sec-websocket-key']))
+  @write_head 101, {
+    ['Upgrade']: 'WebSocket'
+    ['Connection']: 'Upgrade'
+    ['Sec-WebSocket-Accept']: String.base64(verify_secret(@req.headers['sec-websocket-key']))
+    --TODO['Sec-WebSocket-Protocol']: @req.headers['sec-websocket-protocol'].split('[^,]*')
   }
-  if @req.headers['sec-websocket-protocol']
-    Table.insert blob, ('Sec-WebSocket-Protocol: ' .. @req.headers['sec-websocket-protocol'].split('[^,]*'))
-  @write(Table.concat(blob, '\r\n') .. '\r\n\r\n')
+  @has_body = true -- override bodyless assumption on 101
   -- parse incoming data
   data = ''
   ondata = (chunk) ->

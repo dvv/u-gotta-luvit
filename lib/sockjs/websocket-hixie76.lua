@@ -54,17 +54,13 @@ return function(self, origin, location, cb)
   p('SHAKE76', origin, location)
   self.sec = self.req.headers['sec-websocket-key1']
   local prefix = self.sec and 'Sec-' or ''
-  local blob = {
-    'HTTP/1.1 101 WebSocket Protocol Handshake',
-    'Upgrade: WebSocket',
-    'Connection: Upgrade',
-    prefix .. 'WebSocket-Origin: ' .. origin,
-    prefix .. 'WebSocket-Location: ' .. location
-  }
-  if self.sec and self.req.headers['sec-websocket-protocol'] then
-    Table.insert(blob, ('Sec-WebSocket-Protocol: ' .. self.req.headers['sec-websocket-protocol'].split('[^,]*')))
-  end
-  self:write(Table.concat(blob, '\r\n') .. '\r\n\r\n')
+  self:write_head(101, {
+    ['Upgrade'] = 'WebSocket',
+    ['Connection'] = 'Upgrade',
+    [prefix .. 'WebSocket-Origin'] = origin,
+    [prefix .. 'WebSocket-Location'] = location
+  })
+  self.has_body = true
   local data = ''
   local ondata
   ondata = function(chunk)

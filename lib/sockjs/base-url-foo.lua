@@ -1,13 +1,3 @@
-local _ = [==[    -- testing routes
-
-    ['GET /disabled_websocket_echo[/]?$']: (nxt) =>
-      @send 200
-      return
-
-    ['(%w+) /close/']: (nxt, verb) =>
-      @send 200, 'c[3000,"Go away!"]\n'
-      return
-]==]
 return {
   'GET (/.-)[/]?$',
   function(self, nxt, root)

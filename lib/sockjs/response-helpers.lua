@@ -17,7 +17,7 @@ Response.prototype.handle_balancer_cookie = function(self)
   self:set_header('Set-Cookie', 'JSESSIONID=' .. jsid .. '; path=/')
   return 
 end
-Response.prototype.write_frame1 = function(self, payload)
+Response.prototype.write_frame = function(self, payload)
   self.curr_size = self.curr_size + #payload
   self:write(payload)
   if self.max_size and self.curr_size >= self.max_size then
@@ -25,7 +25,7 @@ Response.prototype.write_frame1 = function(self, payload)
   end
   return 
 end
-Response.prototype.write_frame = function(self, payload)
+Response.prototype.write_frame2 = function(self, payload)
   self.curr_size = self.curr_size + #payload
   self:write(payload, function()
     if self.max_size and self.curr_size >= self.max_size then
