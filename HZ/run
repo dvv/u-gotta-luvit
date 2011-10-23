@@ -1,5 +1,0 @@
-#!/bin/sh
-
-#rm lib.so
-#gcc -o lib.so -shared lib.c
-luvit test.lua

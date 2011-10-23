@@ -1,0 +1,14 @@
+#!/bin/sh
+
+test_ok() {
+
+  ls
+}
+
+test_nak() {
+
+  ls1
+}
+
+( test_ok >tmp-log 2>&1 || cat tmp-log ) ; rm tmp-log
+( test_nak >tmp-log 2>&1 || cat tmp-log ) ; rm tmp-log

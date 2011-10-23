@@ -1,23 +1,27 @@
-require('./lib/util')
-local Stack = require('./lib/stack')
-local SockJS = require('./lib/sockjs')
+local Server = require('server')
+local SockJS = require('sockjs-luvit')
 local _error = error
 local error
 error = function(...)
   return p('BADBADBAD ERROR', ...)
 end
+local _ = [==[  (req, res, continue) ->
+    p(req.method)
+    continue()
+]==]
 local http_stack_layers
 http_stack_layers = function()
   return {
-    Stack.use('route')({
+    Server.use('route')({
       {
         'GET /$',
         function(self, nxt)
+          p('FOO')
           return self:render('index.html', self.req.context)
         end
       }
     }),
-    Stack.use('static')('/public/', 'public/', { }),
+    Server.use('static')('/public/', 'public/', { }),
     SockJS()
   }
 end
@@ -48,6 +52,6 @@ SockJS('/amplify', {
     end)
   end
 })
-local s1 = Stack(http_stack_layers()):run(8080)
+local s1 = Server.run(http_stack_layers(), 8080)
 print('Server listening at http://localhost:8080/')
 require('repl')

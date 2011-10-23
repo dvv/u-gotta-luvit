@@ -1,22 +1,27 @@
-require './lib/util'
-Stack = require './lib/stack'
-SockJS = require './lib/sockjs'
+Server = require 'server'
+SockJS = require 'sockjs-luvit'
 
 _error = error
 error = (...) -> p('BADBADBAD ERROR', ...)
 
+[==[
+  (req, res, continue) ->
+    p(req.method)
+    continue()
+]==]
+
 http_stack_layers = () -> {
 
-
   -- serve chrome page
-  Stack.use('route')({{
+  Server.use('route')({{
     'GET /$'
     (nxt) =>
+      p('FOO')
       @render 'index.html', @req.context
   }})
 
   -- serve static files
-  Stack.use('static')('/public/', 'public/', {
+  Server.use('static')('/public/', 'public/', {
     --is_cacheable: (file) -> true
   })
 
@@ -49,6 +54,6 @@ SockJS('/amplify', {
     conn\on 'message', (m) -> conn\send m:rep(2)
 })
 
-s1 = Stack(http_stack_layers!)\run 8080
+s1 = Server.run http_stack_layers(), 8080
 print 'Server listening at http://localhost:8080/'
 require('repl')
